@@ -70,6 +70,7 @@ func main() {
 			authed.GET("/sign/classmates", signHandler.Classmates)
 			authed.POST("/sign/check", signHandler.Check)
 			authed.POST("/sign/execute", signHandler.Execute)
+			authed.POST("/sign/photo", signHandler.Photo)
 
 			// 位置预设（地址库）管理路由
 			authed.GET("/locations", locationHandler.List)
