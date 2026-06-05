@@ -94,6 +94,26 @@ const SignDetail = () => {
     };
   }, [showProgress]);
 
+<<<<<<< HEAD
+=======
+  useEffect(() => {
+    const returnedPhotos = location.state?.returnedPhotos as File[];
+    if (returnedPhotos && returnedPhotos.length > 0) {
+      handlePhotoAdd(returnedPhotos);
+      // Clean up the returnedPhotos from location state to prevent double adding
+      window.history.replaceState({ ...location.state, returnedPhotos: undefined }, '');
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    photoPreviewUrlsRef.current = photoPreviewUrls;
+  }, [photoPreviewUrls]);
+
+  useEffect(() => () => {
+    photoPreviewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+>>>>>>> 9915bd5 (fix：照片签到相机方案优化)
   const sortedClassmates = useMemo(() => {
     if (!currentUser) return classmates;
     return [...classmates].sort((a, b) => {
@@ -521,6 +541,7 @@ const SignDetail = () => {
             {activity.sign_type === 5 && <PinInput value={signCode} onChange={setSignCode} />}
             {activity.sign_type === 4 && <LocationInput name={locationPresets.find((p) => p.lat === lat)?.name || ''} description={locationStr} lat={lat} lng={lng} onOpen={() => setIsLocationPickerOpen(true)} />}
             {activity.sign_type === 2 && <QrInput />}
+<<<<<<< HEAD
             {activity.sign_type === 0 && <NormalInput />}
           </div>
 
@@ -531,6 +552,28 @@ const SignDetail = () => {
             }}>
             <button
               onClick={activity.sign_type === 2 ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } }) : handleExecute}
+=======
+            {isPhotoSign && (
+              <PhotoInput 
+                files={photoFiles} 
+                previewUrls={photoPreviewUrls} 
+                disabled={isExecuting} 
+                onAdd={handlePhotoAdd} 
+                onRemove={removePhoto} 
+                onClear={clearPhotos}
+                onOpenCamera={() => navigate('/photo-capture', { state: { activity, course, selectedUids, classmates, existingPhotos: photoFiles } })}
+              />
+            )}
+            {activity.sign_type === 0 && !isPhotoSign && <NormalInput />}
+          </div>
+
+          <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
+            <button 
+              onClick={activity.sign_type === 2 
+                ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } }) 
+                : handleExecute
+              }
+>>>>>>> 9915bd5 (fix：照片签到相机方案优化)
               disabled={isExecuting}
               className="w-full py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all duration-200 active:scale-[0.97] flex items-center justify-center gap-3 text-white disabled:opacity-50"
               style={{
@@ -538,7 +581,17 @@ const SignDetail = () => {
                 boxShadow: isExecuting ? 'none' : '0 4px 16px rgba(22,93,255,0.3)',
               }}
             >
+<<<<<<< HEAD
               {isExecuting ? <Loader2 className="animate-spin" size={18} /> : (activity.sign_type === 2 ? <><QrCode size={18} /> 去扫码签到</> : (selectedUids.length > 0 ? `签到 (${selectedUids.length + 1})` : "签到"))}
+=======
+              {isExecuting ? (
+                <Loader2 className="animate-spin" size={18} />
+              ) : activity.sign_type === 2 ? (
+                <><QrCode size={18} /> 去扫码签到</>
+              ) : (
+                <>{selectedUids.length > 0 ? `立即签到 (${selectedUids.length + 1})` : "立即签到"}</>
+              )}
+>>>>>>> 9915bd5 (fix：照片签到相机方案优化)
             </button>
           </div>
         </div>
