@@ -80,7 +80,6 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
         </div>
       )}
 
-<<<<<<< HEAD
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -91,9 +90,7 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
           <Camera size={16} />
           拍照添加
         </button>
-=======
       <div className="grid grid-cols-2 gap-3">
->>>>>>> 9915bd5 (fix：照片签到相机方案优化)
         <button
           type="button"
           disabled={disabled}

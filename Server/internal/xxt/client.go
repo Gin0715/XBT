@@ -839,7 +839,6 @@ func (c *Client) QuickAnswer(mobile, password string, courseID, classID, activeI
 	return result, nil
 }
 
-// ======================== 基于抓包新增的抢答 API ========================
 
 // AnswerAttendInfoResult 活动详情 + 抢答状态（抓包: /v2/apis/answer/getAnswerAttendInfo）
 type AnswerAttendInfoResult struct {

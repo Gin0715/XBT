@@ -7,11 +7,8 @@ import SignDetail from './pages/SignDetail';
 import Whitelist from './pages/Whitelist';
 import AccountManagement from './pages/AccountManagement';
 import FullScanner from './pages/FullScanner';
-<<<<<<< HEAD
 import Quiz from './pages/Quiz';
-=======
 import FullPhoto from './pages/FullPhoto';
->>>>>>> 9915bd5 (fix：照片签到相机方案优化)
 import ProtectedRoute from './components/ProtectedRoute';
 import { useEffect } from 'react';
 
@@ -101,11 +98,8 @@ function App() {
               <Route path="/admin/whitelist" element={<Whitelist />} />
               <Route path="/accounts" element={<AccountManagement />} />
               <Route path="/scanner" element={<FullScanner />} />
-<<<<<<< HEAD
               <Route path="/quiz" element={<Quiz />} />
-=======
               <Route path="/photo-capture" element={<FullPhoto />} />
->>>>>>> 9915bd5 (fix：照片签到相机方案优化)
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
