@@ -41,6 +41,11 @@ func main() {
 	whitelistHandler := handler.NewWhitelistHandler(database)
 	locationHandler := handler.NewLocationHandler(database)
 
+	// ✅ 一次性清理旧版硬编码默认地址（HA~HE），不影响用户自建数据
+	if err := locationHandler.CleanupLegacyDefaults(); err != nil {
+		log.Printf("cleanup legacy location defaults failed: %v", err)
+	}
+
 	// ✅ 修复：初始化 MonitorService 并传入 QuizHandler
 	monitorSvc := quizsvc.NewQuizMonitorService(database, xxtClient, credentialCrypto)
 	quizHandler := quizhandler.NewQuizHandler(database, xxtClient, credentialCrypto, monitorSvc)

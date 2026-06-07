@@ -165,3 +165,17 @@ func (h *LocationHandler) Delete(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// CleanupLegacyDefaults 清理旧版硬编码地址库（HA~HE @ 曹妃甸）
+// 仅删除 user_uid=0 且名称匹配的旧硬编码全局预设，不影响用户自建数据
+func (h *LocationHandler) CleanupLegacyDefaults() error {
+	legacyNames := []string{"HA", "HB", "HC", "HD", "HE"}
+	result := h.db.Where("user_uid = 0 AND name IN ?", legacyNames).Delete(&model.LocationPreset{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	return nil
+}
+
