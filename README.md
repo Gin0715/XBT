@@ -1,4 +1,4 @@
-# XBT 学不通 2.0
+# XBT 学不通 2.0 Plus
 
 <div align="center">
 
