@@ -11,6 +11,7 @@ import {
   Loader2,
   BookOpen,
   User,
+  Camera,
   Fingerprint,
   RectangleEllipsis,
   Plus,
@@ -34,7 +35,46 @@ import { PinInput } from '../components/sign/PinInput';
 import { LocationInput } from '../components/sign/LocationInput';
 import { QrInput } from '../components/sign/QrInput';
 import { NormalInput } from '../components/sign/NormalInput';
+import { PhotoInput } from '../components/sign/PhotoInput';
 import { ProgressCard } from '../components/sign/ProgressCard';
+
+const MAX_PHOTO_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+const isImageFile = (file: File) => (
+  file.type.startsWith('image/')
+  || /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(file.name)
+);
+
+function shuffleItems<T>(items: T[]) {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
+const buildPhotoAssignments = (targetUids: number[], files: File[]) => {
+  const assignments = new Map<number, File>();
+  if (files.length === 0) return assignments;
+
+  if (files.length >= targetUids.length) {
+    const shuffledFiles = shuffleItems(files);
+    targetUids.forEach((uid, index) => {
+      assignments.set(uid, shuffledFiles[index]);
+    });
+    return assignments;
+  }
+
+  let shuffledCycle = shuffleItems(files);
+  targetUids.forEach((uid, index) => {
+    if (index > 0 && index % files.length === 0) {
+      shuffledCycle = shuffleItems(files);
+    }
+    assignments.set(uid, shuffledCycle[index % files.length]);
+  });
+  return assignments;
+};
 
 const SignDetail = () => {
   const location = useLocation();
@@ -65,6 +105,11 @@ const SignDetail = () => {
   const [signStatuses, setSignStatuses] = useState<Record<number, Partial<SignStatusMessage>>>({});
   const [classmateSignStates, setClassmateSignStates] = useState<Record<number, SignCheckItem>>({});
 
+  // Photo sign-in state
+  const isPhotoSign = activity?.if_photo ?? false;
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
+
   // Auto-locate state
   const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [geoAddress, setGeoAddress] = useState<AMapAddress | null>(null);
@@ -74,6 +119,7 @@ const SignDetail = () => {
 
   const isExecutingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const photoPreviewUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (showProgress) {
@@ -273,6 +319,51 @@ const SignDetail = () => {
     }
   };
 
+  const handlePhotoAdd = (files: File[]) => {
+    const acceptedFiles: File[] = [];
+    let invalidTypeCount = 0;
+    let oversizeCount = 0;
+
+    files.forEach((file) => {
+      if (!isImageFile(file)) {
+        invalidTypeCount += 1;
+        return;
+      }
+
+      if (file.size > MAX_PHOTO_UPLOAD_BYTES) {
+        oversizeCount += 1;
+        return;
+      }
+
+      acceptedFiles.push(file);
+    });
+
+    if (invalidTypeCount > 0) {
+      toast.error(`${invalidTypeCount} 个文件不是图片，已跳过`);
+    }
+    if (oversizeCount > 0) {
+      toast.error(`${oversizeCount} 张照片超过 20MB，已跳过`);
+    }
+    if (acceptedFiles.length === 0) return;
+
+    const nextUrls = acceptedFiles.map((file) => URL.createObjectURL(file));
+    setPhotoFiles(prev => [...prev, ...acceptedFiles]);
+    setPhotoPreviewUrls(prev => [...prev, ...nextUrls]);
+  };
+
+  const removePhoto = (index: number) => {
+    const url = photoPreviewUrls[index];
+    if (url) URL.revokeObjectURL(url);
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== index));
+    setPhotoPreviewUrls((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const clearPhotos = () => {
+    photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    setPhotoFiles([]);
+    setPhotoPreviewUrls([]);
+  };
+
   const toggleClassmate = (uid: number) => {
     setSelectedUids(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]);
   };
@@ -283,6 +374,8 @@ const SignDetail = () => {
   };
 
   const handleExecute = async () => {
+    const selectedPhotoFiles = [...photoFiles];
+
     if ((activity.sign_type === 3 || activity.sign_type === 5) && (!signCode || signCode.length < 4)) {
       toast.error('请输入正确位数的签到码 / 手势');
       return;
@@ -293,6 +386,11 @@ const SignDetail = () => {
       return;
     }
 
+    if (isPhotoSign && selectedPhotoFiles.length === 0) {
+      toast.error('请先拍照或选择照片');
+      return;
+    }
+
     setIsExecuting(true);
     isExecutingRef.current = true;
     setShowProgress(true);
@@ -300,7 +398,8 @@ const SignDetail = () => {
 
     abortControllerRef.current = new AbortController();
 
-    const targetUids = [currentUser?.uid, ...selectedUids].filter(Boolean) as number[];
+    const targetUids = Array.from(new Set([currentUser?.uid, ...selectedUids].filter(Boolean) as number[]));
+    const photoAssignments = isPhotoSign ? buildPhotoAssignments(targetUids, selectedPhotoFiles) : new Map<number, File>();
     const initialStatuses: Record<number, any> = {};
     targetUids.forEach(uid => initialStatuses[uid] = { status: 'pending', message: '等待中' });
     setSignStatuses(initialStatuses);
@@ -354,6 +453,13 @@ const SignDetail = () => {
           }));
 
           try {
+            const assignedPhotoFile = isPhotoSign ? photoAssignments.get(uid) : null;
+            if (isPhotoSign && !assignedPhotoFile) {
+              lastError = '未找到可上传照片';
+              setSignStatuses(prev => ({ ...prev, [uid]: { ...prev[uid], message: lastError } }));
+              continue;
+            }
+
             const special_params: Record<string, any> = {};
             if (activity.sign_type === 3 || activity.sign_type === 5) special_params.sign_code = signCode;
             else if (activity.sign_type === 4) {
@@ -362,13 +468,26 @@ const SignDetail = () => {
               special_params.description = locationStr;
             }
 
-            const execResp = await client.post<ApiResponse<any>>('/sign/execute', {
-              activity_id: activity.active_id, target_uid: uid, sign_type: activity.sign_type,
-              course_id: activity.course_id, class_id: activity.class_id, if_refresh_ewm: activity.if_refresh_ewm,
-              special_params
-            }, {
-              signal: abortControllerRef.current?.signal
-            });
+            const execResp = isPhotoSign && assignedPhotoFile
+              ? await client.post<ApiResponse<any>>('/sign/photo', (() => {
+                const formData = new FormData();
+                formData.append('activity_id', String(activity.active_id));
+                formData.append('course_id', String(activity.course_id));
+                formData.append('class_id', String(activity.class_id));
+                formData.append('target_uid', String(uid));
+                formData.append('if_refresh_ewm', String(activity.if_refresh_ewm));
+                formData.append('file', assignedPhotoFile);
+                return formData;
+              })(), {
+                signal: abortControllerRef.current?.signal
+              })
+              : await client.post<ApiResponse<any>>('/sign/execute', {
+                activity_id: activity.active_id, target_uid: uid, sign_type: activity.sign_type,
+                course_id: activity.course_id, class_id: activity.class_id, if_refresh_ewm: activity.if_refresh_ewm,
+                special_params
+              }, {
+                signal: abortControllerRef.current?.signal
+              });
 
             const res = execResp.data.data;
             if (res.success || res.already_signed) {
@@ -432,6 +551,8 @@ const SignDetail = () => {
   if (!activity) return null;
 
   const getSignTypeName = () => {
+    if (isPhotoSign) return '拍照签到';
+
     switch (activity.sign_type) {
       case 0: return '普通签到';
       case 2: return '二维码签到';
@@ -443,6 +564,8 @@ const SignDetail = () => {
   };
 
   const getSignIcon = (size: number = 24) => {
+    if (isPhotoSign) return <Camera size={size} />;
+
     switch (activity.sign_type) {
       case 2: return <QrCode size={size} />;
       case 3: return <Fingerprint size={size} />;
@@ -538,34 +661,27 @@ const SignDetail = () => {
             {activity.sign_type === 5 && <PinInput value={signCode} onChange={setSignCode} />}
             {activity.sign_type === 4 && <LocationInput name={locationPresets.find((p) => p.lat === lat)?.name || ''} description={locationStr} lat={lat} lng={lng} onOpen={() => setIsLocationPickerOpen(true)} />}
             {activity.sign_type === 2 && <QrInput />}
-            {activity.sign_type === 0 && <NormalInput />}
-          </div>
-
-          <div className="px-5 py-4 mt-auto shrink-0 border-t"
-            style={{
-              background: 'linear-gradient(180deg, rgba(248,250,252,0.5), rgba(255,255,255,0.9))',
-              borderColor: 'rgba(226,232,240,0.4)',
-            }}>
-            <button
-              onClick={activity.sign_type === 2 ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } }) : handleExecute}
-            {isPhotoSign && (
-              <PhotoInput 
-                files={photoFiles} 
-                previewUrls={photoPreviewUrls} 
-                disabled={isExecuting} 
-                onAdd={handlePhotoAdd} 
-                onRemove={removePhoto} 
-                onClear={clearPhotos}
-                onOpenCamera={() => navigate('/photo-capture', { state: { activity, course, selectedUids, classmates, existingPhotos: photoFiles } })}
-              />
-            )}
             {activity.sign_type === 0 && !isPhotoSign && <NormalInput />}
           </div>
 
+          {isPhotoSign && (
+            <div className="px-5 pb-4">
+              <PhotoInput
+                files={photoFiles}
+                previewUrls={photoPreviewUrls}
+                disabled={isExecuting}
+                onAdd={handlePhotoAdd}
+                onRemove={removePhoto}
+                onClear={clearPhotos}
+                onOpenCamera={() => navigate('/photo-capture', { state: { activity, course, selectedUids, classmates, existingPhotos: photoFiles } })}
+              />
+            </div>
+          )}
+
           <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
-            <button 
-              onClick={activity.sign_type === 2 
-                ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } }) 
+            <button
+              onClick={activity.sign_type === 2
+                ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } })
                 : handleExecute
               }
               disabled={isExecuting}
@@ -575,7 +691,6 @@ const SignDetail = () => {
                 boxShadow: isExecuting ? 'none' : '0 4px 16px rgba(22,93,255,0.3)',
               }}
             >
-              {isExecuting ? <Loader2 className="animate-spin" size={18} /> : (activity.sign_type === 2 ? <><QrCode size={18} /> 去扫码签到</> : (selectedUids.length > 0 ? `签到 (${selectedUids.length + 1})` : "签到"))}
               {isExecuting ? (
                 <Loader2 className="animate-spin" size={18} />
               ) : activity.sign_type === 2 ? (

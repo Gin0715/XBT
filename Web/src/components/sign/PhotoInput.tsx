@@ -80,16 +80,6 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => cameraInputRef.current?.click()}
-          className="py-3 rounded-xl bg-blue-600 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-100 disabled:opacity-50 disabled:shadow-none"
-        >
-          <Camera size={16} />
-          拍照添加
-        </button>
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
