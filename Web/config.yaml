@@ -1,0 +1,28 @@
+# Frontend Configuration
+
+api:
+  base_url: "/api"
+  timeout: 10000
+
+sign:
+  location_presets:
+    - name: "HA"
+      lng: "118.597869"
+      lat: "39.210063"
+      description: "河北省唐山市曹妃甸区渤海大道21号"
+    - name: "HB"
+      lng: "118.599156"
+      lat: "39.210225"
+      description: "河北省唐山市曹妃甸区渤海大道21号"
+    - name: "HC"
+      lng: "118.598005"
+      lat: "39.211287"
+      description: "河北省唐山市曹妃甸区渤海大道21号"
+    - name: "HD"
+      lng: "118.599048"
+      lat: "39.211264"
+      description: "河北省唐山市曹妃甸区渤海大道21号"
+    - name: "HE"
+      lng: "118.597755"
+      lat: "39.212209"
+      description: "河北省唐山市曹妃甸区渤海大道21号"

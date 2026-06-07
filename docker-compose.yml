@@ -1,0 +1,91 @@
+services:
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: xbt-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xbt
+      POSTGRES_USER: xbt
+      POSTGRES_PASSWORD: xbt_password_2024
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xbt -d xbt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xbt-network
+
+  # 后端服务
+  xbt-server:
+    build:
+      context: ./Server
+      dockerfile: Dockerfile
+    container_name: xbt-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 👇 【新增】挂载本地的配置文件到容器内
+    volumes:
+      - ./Server/config.yaml:/app/config.yaml
+    environment:
+      - APP_ENV=production
+      - HTTP_ADDR=:8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=xbt
+      - DB_PASSWORD=xbt_password_2024
+      - DB_NAME=xbt
+      - DB_SSL_MODE=disable
+      - JWT_SECRET=your_jwt_secret_key_here_please_change_in_production
+      - CREDENTIAL_SECRET=your_credential_secret_key_here_please_change
+      - CHAOXING_AES_KEY=u2oh6Vu^HWe40fj
+      - CHAOXING_USER_AGENT=Dalvik/2.1.0 (Linux; U; Android 13; SM-G9980 Build/TP1A.220624.014)
+      - ALLOW_INSECURE_TLS=true
+      - ACTIVITY_LIST_LIMIT=20
+      - TZ=Asia/Shanghai
+    ports:
+      - "8083:8080"
+    networks:
+      - xbt-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s # 给后端服务一点启动时间
+
+  # 前端应用
+  xbt-web:
+    build:
+      context: ./Web
+      dockerfile: Dockerfile
+    container_name: xbt-web
+    restart: unless-stopped
+    depends_on:
+      - xbt-server
+    ports:
+      - "8092:80"
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - xbt-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  xbt-network:
+    driver: bridge
