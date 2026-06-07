@@ -23,7 +23,7 @@ XBT 是一个基于 Go + React 的超星学习通自动化工具，现已集成*
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/EnderWolf006/XBT.git
+git clone https://github.com/Gin0715/XBT.git
 cd XBT
 
 # 2. 启动服务
