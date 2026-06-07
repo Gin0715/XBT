@@ -41,11 +41,6 @@ func main() {
 	whitelistHandler := handler.NewWhitelistHandler(database)
 	locationHandler := handler.NewLocationHandler(database)
 
-	// ✅ 同步全局默认位置预设 — 替换旧的地址库为 xbt2 地址
-	if err := locationHandler.SyncDefaults(); err != nil {
-		log.Printf("sync location defaults failed: %v", err)
-	}
-
 	// ✅ 修复：初始化 MonitorService 并传入 QuizHandler
 	monitorSvc := quizsvc.NewQuizMonitorService(database, xxtClient, credentialCrypto)
 	quizHandler := quizhandler.NewQuizHandler(database, xxtClient, credentialCrypto, monitorSvc)

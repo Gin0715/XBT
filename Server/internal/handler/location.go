@@ -165,28 +165,3 @@ func (h *LocationHandler) Delete(c *gin.Context) {
 	common.Success(c, nil)
 }
 
-// SyncDefaults 同步全局默认位置预设 — 删除所有旧全局预设并写入 xbt2 地址库
-// 用户私有预设 (user_uid > 0) 不受影响
-func (h *LocationHandler) SyncDefaults() error {
-	// 1. 删除所有旧的全局预设
-	if err := h.db.Where("user_uid = 0").Delete(&model.LocationPreset{}).Error; err != nil {
-		return err
-	}
-
-	// 2. 写入新的 xbt2 地址库
-	defaults := []model.LocationPreset{
-		// xbt2 地址库 (河北省唐山市曹妃甸区渤海大道21号)
-		{Name: "HA", Latitude: "39.210063", Longitude: "118.597869", Description: "河北省唐山市曹妃甸区渤海大道21号", SortOrder: 1},
-		{Name: "HB", Latitude: "39.210225", Longitude: "118.599156", Description: "河北省唐山市曹妃甸区渤海大道21号", SortOrder: 2},
-		{Name: "HC", Latitude: "39.211287", Longitude: "118.598005", Description: "河北省唐山市曹妃甸区渤海大道21号", SortOrder: 3},
-		{Name: "HD", Latitude: "39.211264", Longitude: "118.599048", Description: "河北省唐山市曹妃甸区渤海大道21号", SortOrder: 4},
-		{Name: "HE", Latitude: "39.212209", Longitude: "118.597755", Description: "河北省唐山市曹妃甸区渤海大道21号", SortOrder: 5},
-	}
-	for _, p := range defaults {
-		p.UserUID = 0
-		if err := h.db.Create(&p).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}

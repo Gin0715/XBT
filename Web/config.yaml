@@ -4,5 +4,4 @@ api:
   base_url: "/api"
   timeout: 10000
 
-sign:
-  location_presets: []
+# sign.location_presets 已迁移至服务端 API，通过 /api/locations 动态管理
