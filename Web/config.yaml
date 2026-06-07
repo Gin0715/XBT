@@ -5,11 +5,7 @@ api:
   timeout: 10000
 
 sign:
-  location_presets:
-    - name: "HA"
-      lng: "118.597869"
-      lat: "39.210063"
-      description: "河北省唐山市曹妃甸区渤海大道21号"
+  location_presets: []
     - name: "HB"
       lng: "118.599156"
       lat: "39.210225"
