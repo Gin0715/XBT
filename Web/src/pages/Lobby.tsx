@@ -14,6 +14,7 @@ import {
   MapPin,
   Fingerprint,
   BookOpen,
+  Camera,
   CheckCircle2,
   RectangleEllipsis,
   Zap,
@@ -174,8 +175,11 @@ const Lobby = () => {
     }));
   };
 
-  const getSignTypeIcon = (type: number) => {
-    switch (type) {
+  const isPhotoActivity = (activity: CourseActivities['activities'][number]) => activity.sign_type === 0 && activity.if_photo;
+
+  const getSignTypeIcon = (activity: CourseActivities['activities'][number]) => {
+    if (isPhotoActivity(activity)) return <Camera size={18} />;
+    switch (activity.sign_type) {
       case 2: return <QrCode size={18} />;
       case 3: return <Fingerprint size={18} />;
       case 4: return <MapPin size={18} />;
@@ -184,8 +188,9 @@ const Lobby = () => {
     }
   };
 
-  const getSignTypeName = (type: number) => {
-    switch (type) {
+  const getSignTypeName = (activity: CourseActivities['activities'][number]) => {
+    if (isPhotoActivity(activity)) return '拍照';
+    switch (activity.sign_type) {
       case 2: return '二维码';
       case 3: return '手势';
       case 4: return '位置';
@@ -439,14 +444,14 @@ const Lobby = () => {
                                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0 bg-white ${
                                         shouldHighlight ? 'text-info-500' : 'text-brand-600'
                                       }`}>
-                                        {getSignTypeIcon(activity.sign_type)}
+                                        {getSignTypeIcon(activity)}
                                       </div>
                                       <div className="flex-1 min-w-0">
                                         <div className="font-bold text-sm truncate text-text-primary">{activity.activity_name}</div>
                                         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
                                           <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold uppercase shrink-0"
                                             style={{ background: 'rgba(22,93,255,0.08)', color: '#165DFF' }}>
-                                            {getSignTypeName(activity.sign_type)}
+                                            {getSignTypeName(activity)}
                                           </span>
                                           {shouldHighlight && (
                                             <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold whitespace-nowrap shrink-0"

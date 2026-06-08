@@ -582,7 +582,7 @@ func (c *Client) GetSignDetail(mobile, password string, activityID int64) (SignD
 		EndTime:      end,
 		SignType:     int(int64FromAny(payload["otherId"])),
 		IfRefreshEWM: boolFromAny(payload["ifRefreshEwm"]),
-		IfPhoto:      boolFromAny(payload["ifPhoto"]),
+		IfPhoto:      boolFromAny(deepFindFirst(payload, "ifphoto", "ifPhoto")),
 	}, nil
 }
 

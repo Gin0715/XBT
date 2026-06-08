@@ -129,7 +129,7 @@ const SignDetail = () => {
   const [classmateSignStates, setClassmateSignStates] = useState<Record<number, SignCheckItem>>({});
 
   // Photo sign-in state
-  const isPhotoSign = activity?.if_photo ?? false;
+  const isPhotoSign = activity?.sign_type === 0 && !!activity?.if_photo;
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
 
