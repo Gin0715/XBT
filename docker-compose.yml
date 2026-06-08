@@ -49,9 +49,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # 👇 【新增】挂载本地的配置文件到容器内
-    volumes:
-      - ./Server/config.yaml:/app/config.yaml
+    # ⚠️ Windows 网络驱动器 (Z:\ 映射自 \\192.168.31.146\xbt) 上的 bind mount
+    # 可能被 Docker Desktop 静默创建为空目录，导致 "read config.yaml: is a directory" 错误。
+    #
+    # 解决方案：配置文件已直接打入 Docker 镜像（见 Dockerfile），volume 挂载不再必须。
+    # 如需自定义配置，有以下两种方式：
+    #   方式A：将 config.yaml 放在本地驱动器（如 C:\）再挂载：
+    #     volumes:
+    #       - C:/path/to/config.yaml:/app/config.yaml
+    #   方式B：挂载到其他路径并通过 CONFIG_PATH 环境变量指定：
+    #     volumes:
+    #       - ./Server/config.yaml:/app/custom-config.yaml
+    #     environment:
+    #       - CONFIG_PATH=/app/custom-config.yaml
+    # volumes:
+    #   - ./Server/config.yaml:/app/config.yaml
     environment:
       - APP_ENV=production
       - HTTP_ADDR=:8080

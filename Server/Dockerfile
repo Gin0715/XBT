@@ -40,9 +40,10 @@ ENV TZ=Asia/Shanghai
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/xbt-server .
 
-# 【修复】注释掉下面这行，因为项目里找不到这个文件。
-# 配置文件建议在 docker-compose.yml 中通过 volumes 挂载进来。
-# COPY --from=builder /app/config.example.yaml ./config.yaml
+# 将配置文件打入镜像作为兜底
+# 优先级：docker-compose volumes 挂载 > 镜像内默认文件
+# 如果 Windows 网络驱动器挂载失败，容器仍能使用镜像内的默认配置启动
+COPY --from=builder /app/config.yaml ./config.yaml
 
 # 暴露端口
 EXPOSE 8080
