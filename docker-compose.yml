@@ -49,9 +49,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # 挂载配置文件（镜像内已内置默认配置作为兜底，此挂载会覆盖它）
-    volumes:
-      - ./Server/config.yaml:/app/config.yaml
+    # 容器内已内置默认配置（见 Dockerfile），无需额外挂载
+    # 如需自定义配置，取消下行注释并调整路径：
+    # volumes:
+    #   - ./Server/config.yaml:/app/config.yaml
     environment:
       - APP_ENV=production
       - HTTP_ADDR=:8080
