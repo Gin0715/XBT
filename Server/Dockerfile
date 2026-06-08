@@ -20,6 +20,18 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
+# 确保 config.yaml 存在（即使构建上下文中没有，也生成一份 Docker 默认配置作为兜底）
+RUN if [ ! -f config.yaml ]; then \
+      if [ -f config_example.yaml ]; then \
+        echo "*** Warning: config.yaml not found, creating from config_example.yaml ***"; \
+        cp config_example.yaml config.yaml; \
+      else \
+        echo "*** Warning: neither config.yaml nor config_example.yaml found, creating minimal config ***"; \
+        printf 'app_env: prod\nhttp_addr: ":8080"\njwt_secret: "change_me_in_production"\ncredential_secret: "change_me_in_production"\nallow_insecure_tls: true\nchaoxing_aes_key: "u2oh6Vu^HWe4_AES"\nchaoxing_user_agent: "Dalvik/2.1.0 (Linux; U; Android 14; Redmi K20 Pro Build/UKQ1.230804.001)"\nactivity_list_limit: 5\npostgres_dsn: "host=postgres port=5432 user=xbt password=xbt_password_2024 dbname=xbt sslmode=disable TimeZone=Asia/Shanghai"\nredis_addr: "redis:6379"\nredis_password: ""\nredis_db: 0\nbaidu_map_ak: ""\n' > config.yaml; \
+      fi; \
+    fi && \
+    echo "config.yaml content:" && cat config.yaml
+
 # 构建应用（GOFLAGS=-mod=mod 允许 go build 自动填充 go.sum 缺失条目）
 RUN GOFLAGS=-mod=mod CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o xbt-server ./cmd/server/main.go
 
