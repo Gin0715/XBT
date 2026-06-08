@@ -895,7 +895,7 @@ const FullScanner = () => {
       <AnimatePresence initial={false}>
         {isExecuting && !isStealthMode && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-30 flex items-end justify-center bg-black/20" onClick={closePopup}>
-            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="bg-white/70 backdrop-blur-md w-full rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0.4)] border-t border-white/20 flex flex-col max-h-[40vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="bg-white/70 backdrop-blur-md w-full rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0.4)] border-t border-white/20 flex flex-col max-h-[40%] overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="p-5 pt-7 shrink-0 flex items-center justify-between border-b border-black/5">
                 <div className="flex flex-col">
                   <div className="flex items-center space-x-2">
@@ -976,65 +976,76 @@ const FullScanner = () => {
         )}
       </AnimatePresence>
 
-      <div className="absolute bottom-[calc(48px+var(--sab))] left-8 right-8 z-20 flex items-center justify-between pointer-events-none">
-        <div className="flex items-center space-x-6">
-          <AnimatePresence initial={false}>
-            {!isStealthMode && !isExecuting && (
-              <>
-                <motion.div 
-                  initial={{ x: -120, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  exit={{ x: -120, opacity: 0 }}
-                  transition={{ ease: "easeInOut", duration: 0.3, delay: 0.1 }}
-                  className="flex flex-col items-center space-y-2 group pointer-events-auto active:scale-95 transition-transform"
+      <div className="absolute left-0 right-0 z-20 flex items-end justify-center gap-6 sm:gap-8 px-6 pointer-events-none"
+        style={{ bottom: 'calc(24px + var(--sab))' }}>
+        <AnimatePresence initial={false}>
+          {!isStealthMode && !isExecuting && (
+            <>
+              {/* 位置按钮 */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ ease: "easeInOut", duration: 0.25, delay: 0.1 }}
+                className="flex flex-col items-center gap-1.5 pointer-events-auto"
+              >
+                <button
+                  type="button"
+                  onClick={() => { setIsLocationPickerOpen(true); fetchLocations(); }}
+                  className="btn-tap-sm w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors duration-200"
+                  style={{
+                    background: lat ? 'rgba(22,93,255,0.85)' : 'rgba(0,0,0,0.4)',
+                  }}
                 >
-                  <Button
-                    type="button"
-                    onClick={() => { setIsLocationPickerOpen(true); fetchLocations(); }}
-                    className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors ${lat ? 'bg-blue-600 text-white' : 'bg-black/40 text-white'}`}
-                  >
-                    <MapPin size={22} />
-                  </Button>
-                  <span className="text-[10px] text-white/80 font-bold tracking-wider truncate max-w-[60px]">
-                    {lat ? locationPresets.find((p) => p.lat === lat)?.name || "位置" : "位置"}
-                  </span>
-                </motion.div>
+                  <MapPin size={22} className="text-white" />
+                </button>
+                <span className="text-[10px] text-white/80 font-bold tracking-wider truncate max-w-[56px] text-center leading-tight">
+                  {lat ? locationPresets.find((p) => p.lat === lat)?.name || "位置" : "位置"}
+                </span>
+              </motion.div>
 
-                <motion.div 
-                  initial={{ x: -120, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  exit={{ x: -120, opacity: 0 }}
-                  transition={{ ease: "easeInOut", duration: 0.3 }}
-                  className="flex flex-col items-center space-y-2 group pointer-events-auto active:scale-95 transition-transform"
+              {/* 切换摄像头按钮 */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ ease: "easeInOut", duration: 0.25 }}
+                className="flex flex-col items-center gap-1.5 pointer-events-auto"
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowCameraList(true)}
+                  className="btn-tap-sm w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors duration-200"
+                  style={{ background: 'rgba(0,0,0,0.4)' }}
                 >
-                  <Button
-                    type="button"
-                    onClick={() => setShowCameraList(true)}
-                    className="w-14 h-14 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg"
-                  >
-                    <Camera size={22} />
-                  </Button>
-                  <span className="text-[10px] text-white/80 font-bold tracking-wider">切换</span>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
-        <Button
-          type="button"
+                  <Camera size={22} className="text-white" />
+                </button>
+                <span className="text-[10px] text-white/80 font-bold tracking-wider">切换</span>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        {/* 隐藏/显示按钮 — 始终可见，隐身模式下极低透明度但仍然可点 */}
+        <div
           onClick={() => setIsStealthMode(!isStealthMode)}
-          className="flex flex-col items-center space-y-2 transition-all duration-500 pointer-events-auto active:scale-95"
+          className="flex flex-col items-center gap-1.5 pointer-events-auto transition-all duration-500"
           style={{ opacity: isStealthMode ? 0.1 : 1 }}
         >
-          <div className="w-14 h-14 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg">{isStealthMode ? <Eye size={22} /> : <EyeOff size={22} />}</div>
-          <span className="text-[10px] text-white/80 font-bold tracking-wider">{isStealthMode ? "显示" : "隐藏"}</span>
-        </Button>
+          <div className="btn-tap-sm w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors duration-200"
+            style={{ background: 'rgba(0,0,0,0.4)' }}>
+            {isStealthMode ? <Eye size={22} className="text-white" /> : <EyeOff size={22} className="text-white" />}
+          </div>
+          <span className="text-[10px] text-white/80 font-bold tracking-wider">
+            {isStealthMode ? "显示" : "隐藏"}
+          </span>
+        </div>
       </div>
 
       <AnimatePresence>
         {isLocationPickerOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[150] flex items-end justify-center bg-slate-900/60 backdrop-blur-md p-0" onClick={() => setIsLocationPickerOpen(false)}>
-            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 28, stiffness: 250 }} className="bg-white w-full max-w-[480px] rounded-t-[3rem] p-8 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 28, stiffness: 250 }} className="bg-white w-full max-w-[480px] rounded-t-[3rem] p-8 shadow-2xl overflow-hidden flex flex-col max-h-[80%]" onClick={(e) => e.stopPropagation()}>
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8 shrink-0" />
               <div className="flex items-center justify-between mb-6 shrink-0"><h3 className="text-xl font-bold text-slate-900">选择签到位置</h3><button onClick={() => setIsLocationPickerOpen(false)} className="w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-400 rounded-full">✕</button></div>
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-[calc(40px+var(--sab))] custom-scrollbar px-1">
@@ -1183,7 +1194,7 @@ const FullScanner = () => {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] flex items-end justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto" onClick={() => setShowCameraList(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="bg-white w-full max-w-sm rounded-[2rem] p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-black mb-4 text-slate-900">选择摄像头</h3>
-              <div className="space-y-2 max-h-[40vh] overflow-y-auto custom-scrollbar">
+              <div className="space-y-2 max-h-[40%] overflow-y-auto custom-scrollbar">
                 {cameras.map(camera => (
                   <Button
                     key={camera.id}

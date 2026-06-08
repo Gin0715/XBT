@@ -13,6 +13,13 @@ client.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // iOS Safari: when sending FormData, delete any pre-set Content-Type
+  // so the browser can set the correct multipart/form-data boundary.
+  // Without this, iOS may send malformed multipart requests that the
+  // Go backend rejects with a non-2xx status.
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+  }
   return config;
 });
 

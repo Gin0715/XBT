@@ -643,6 +643,14 @@ func (c *Client) PreSign(mobile, password string, fixed FixedParams, code, enc s
 	return nil
 }
 
+func (c *Client) SignPhoto(mobile, password string, fixed FixedParams, objectID string) (string, error) {
+	objectID = strings.TrimSpace(objectID)
+	if objectID == "" {
+		return "", fmt.Errorf("missing photo object_id")
+	}
+	return c.Sign(mobile, password, fixed, SignNormal, map[string]interface{}{"object_id": objectID})
+}
+
 func (c *Client) Sign(mobile, password string, fixed FixedParams, signType int, special map[string]interface{}) (string, error) {
 	s, err := c.ensureSession(mobile, password)
 	if err != nil {

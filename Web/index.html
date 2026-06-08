@@ -5,6 +5,27 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.jpg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <script>
+    // Fix viewport height across iOS/Android/desktop
+    // - iOS Safari: address bar show/hide changes visible area
+    // - Android Chrome: keyboard show/hide changes viewport
+    // - Desktop: consistent behavior
+    var setAppHeight = function() {
+      document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+      document.documentElement.style.setProperty('--app-width', window.innerWidth + 'px');
+    };
+    setAppHeight();
+    window.addEventListener('resize', setAppHeight);
+    window.addEventListener('orientationchange', function() {
+      setTimeout(setAppHeight, 100);
+      setTimeout(setAppHeight, 300);
+    });
+    // Handle iOS Safari address bar collapse/expand
+    if ('visualViewport' in window) {
+      window.visualViewport.addEventListener('resize', setAppHeight);
+      window.visualViewport.addEventListener('scroll', setAppHeight);
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />

@@ -2,6 +2,10 @@ import React, { useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, ImagePlus, X, Trash2, Image } from 'lucide-react';
 
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const ALLOWED_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i;
+const ALLOWED_MIME_PREFIX = 'image/';
+
 interface PhotoInputProps {
   files: File[];
   previewUrls: string[];
@@ -24,8 +28,27 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const nextFiles = Array.from(event.target.files || []);
+    const selectedFiles = event.target.files;
+    if (!selectedFiles || selectedFiles.length === 0) {
+      // Reset input value so the same file can be re-selected on iOS
+      event.target.value = '';
+      return;
+    }
+
+    const nextFiles: File[] = [];
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      // iOS Safari may report empty type for HEIC images — validate by extension too
+      const isImageByMime = file.type && file.type.startsWith(ALLOWED_MIME_PREFIX);
+      const isImageByExt = ALLOWED_EXTENSIONS.test(file.name);
+      if (!isImageByMime && !isImageByExt) continue;
+      if (file.size > MAX_FILE_SIZE) continue;
+      nextFiles.push(file);
+    }
+
+    // Must reset AFTER reading files, otherwise iOS won't re-fire onChange
     event.target.value = '';
+
     if (nextFiles.length > 0) {
       onAdd(nextFiles);
     }
@@ -89,7 +112,7 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
                   layout
                   initial={{ opacity: 0, scale: 0.85 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.85 }}
+                  exit={{ opacity: 0, scale: 0.85, pointerEvents: "none" }}
                   style={{ borderColor: 'rgba(226,232,240,0.5)' }}
                 >
                   <img
@@ -188,10 +211,13 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
       <input
         ref={galleryInputRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/heic,image/heif"
         multiple
         className="hidden"
         onChange={handleChange}
+        // iOS Safari: when input is inside a label/button click chain,
+        // ensure the file picker opens correctly by allowing user interaction
+        onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
     </motion.div>
   );
