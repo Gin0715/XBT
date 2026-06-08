@@ -18,17 +18,15 @@ import {
   Trash2,
   Edit3,
   X,
-  Navigation,
-  Crosshair
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import client from '../api/client';
 import { useAuthStore } from '../store/auth';
 import type { ApiResponse, Classmate, SignActivity, CourseActivities, SignStatusMessage, SignCheckItem } from '../types';
-import { getLocations, createLocation, updateLocation, deleteLocation, type LocationPreset } from '../api/location';
-import { getCurrentPosition, reverseGeocode, type AMapAddress } from '../utils/amap';
-import { validateCoord } from '../utils/coords';
-import { LocationForm, type LocationFormData } from '../components/location/LocationForm';
+import { useLocationPanel, type LocationFormData } from '../hooks/useLocationPanel';
+import { LocationForm } from '../components/location/LocationForm';
+import BMapKeyConfig from '../components/location/BMapKeyConfig';
+import LiveLocationCard from '../components/location/LiveLocationCard';
 
 import { GestureInput } from '../components/sign/GestureInput';
 import { PinInput } from '../components/sign/PinInput';
@@ -90,16 +88,35 @@ const SignDetail = () => {
   const [isExecuting, setIsExecuting] = useState(false);
 
   const [signCode, setSignCode] = useState('');
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
-  const [locationStr, setLocationStr] = useState('');
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
 
-  const [locationPresets, setLocationPresets] = useState<LocationPreset[]>([]);
-  const [isLoadingLocations, setIsLoadingLocations] = useState(false);
-  const [editingLocation, setEditingLocation] = useState<LocationPreset | null>(null);
-  const [isAddingLocation, setIsAddingLocation] = useState(false);
-  const [newLocForm, setNewLocForm] = useState({ name: '', lat: '', lng: '', description: '' });
+  const {
+    locationPresets,
+    isLoadingLocations,
+    fetchLocations,
+    currentPosition,
+    geoAddress,
+    isLocating,
+    isGeocoding,
+    locateSuccess,
+    handleLocate,
+    isAddingLocation,
+    setIsAddingLocation,
+    editingLocation,
+    setEditingLocation,
+    newLocationForm: newLocForm,
+    setNewLocationForm: setNewLocForm,
+    handleAddLocation,
+    handleUpdateLocation,
+    handleDeleteLocation,
+    // 统一选中位置（替代原有的 lat/lng/locationStr 本地状态）
+    selectedLat: lat,
+    selectedLng: lng,
+    selectedAddress: locationStr,
+    setSelectedLat: setLat,
+    setSelectedLng: setLng,
+    setSelectedAddress: setLocationStr,
+  } = useLocationPanel({ autoFillForm: true });
 
   const [showProgress, setShowProgress] = useState(false);
   const [signStatuses, setSignStatuses] = useState<Record<number, Partial<SignStatusMessage>>>({});
@@ -109,13 +126,6 @@ const SignDetail = () => {
   const isPhotoSign = activity?.if_photo ?? false;
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
-
-  // Auto-locate state
-  const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
-  const [geoAddress, setGeoAddress] = useState<AMapAddress | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
-  const [isGeocoding, setIsGeocoding] = useState(false);
-  const [locateSuccess, setLocateSuccess] = useState(false);
 
   const isExecutingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -216,108 +226,6 @@ const SignDetail = () => {
     fetchClassmates();
     fetchLocations();
   }, [activity, navigate]);
-
-  const fetchLocations = async () => {
-    setIsLoadingLocations(true);
-    try {
-      const response = await getLocations();
-      const data = (response.data as any)?.data || response.data || [];
-      setLocationPresets(Array.isArray(data) ? data : []);
-    } catch (err: any) {
-      console.error('加载位置预设失败', err);
-    } finally {
-      setIsLoadingLocations(false);
-    }
-  };
-
-  const handleAddLocation = async () => {
-    if (!newLocForm.name || !newLocForm.lat || !newLocForm.lng) {
-      toast.error('名称、经度、纬度不能为空');
-      return;
-    }
-    const coordCheck = validateCoord(newLocForm.lat, newLocForm.lng);
-    if (!coordCheck.valid) { toast.error(coordCheck.error!); return; }
-    try {
-      const response = await createLocation(newLocForm);
-      const created = (response.data as any)?.data || response.data;
-      setLocationPresets(prev => [...prev, created]);
-      setNewLocForm({ name: '', lat: '', lng: '', description: '' });
-      setIsAddingLocation(false);
-      toast.success('位置已添加');
-    } catch (err: any) {
-      toast.error(err.message || '添加位置失败');
-    }
-  };
-
-  const handleUpdateLocation = async (preset: LocationPreset) => {
-    const coordCheck = validateCoord(preset.lat, preset.lng);
-    if (!coordCheck.valid) { toast.error(coordCheck.error!); return; }
-    try {
-      const response = await updateLocation(preset.id, {
-        name: preset.name,
-        lat: preset.lat,
-        lng: preset.lng,
-        description: preset.description,
-      });
-      const updated = (response.data as any)?.data || response.data;
-      setLocationPresets(prev => prev.map(p => p.id === preset.id ? { ...p, ...updated } : p));
-      setEditingLocation(null);
-      toast.success('位置已更新');
-    } catch (err: any) {
-      toast.error(err.message || '更新位置失败');
-    }
-  };
-
-  const handleDeleteLocation = async (id: number) => {
-    if (!confirm('确定要删除这个位置吗？')) return;
-    try {
-      await deleteLocation(id);
-      setLocationPresets(prev => prev.filter(p => p.id !== id));
-      toast.success('位置已删除');
-    } catch (err: any) {
-      toast.error(err.message || '删除位置失败');
-    }
-  };
-
-  const handleLocate = async () => {
-    setIsLocating(true);
-    setGeoAddress(null);
-    setLocateSuccess(false);
-    try {
-      const pos = await getCurrentPosition();
-      setCurrentPosition(pos);
-      setLocateSuccess(true);
-      setTimeout(() => setLocateSuccess(false), 1500);
-      toast.success('定位成功');
-
-      setIsGeocoding(true);
-      try {
-        const addr = await reverseGeocode(pos.lat, pos.lng);
-        setGeoAddress(addr);
-        // Auto-fill form if adding new location
-        if (isAddingLocation) {
-          if (!newLocForm.name && addr.poiName) setNewLocForm(f => ({ ...f, name: addr.poiName }));
-          if (!newLocForm.description && addr.formattedAddress) setNewLocForm(f => ({ ...f, description: addr.formattedAddress }));
-          setNewLocForm(f => ({ ...f, lat: pos.lat.toFixed(6), lng: pos.lng.toFixed(6) }));
-        }
-        // Auto-select the live position for check-in
-        setLat(pos.lat.toFixed(6));
-        setLng(pos.lng.toFixed(6));
-        setLocationStr(addr.formattedAddress || addr.poiName || `${pos.lng.toFixed(6)}, ${pos.lat.toFixed(6)}`);
-      } catch {
-        // Reverse geocode failed — still use coordinates
-        setLat(pos.lat.toFixed(6));
-        setLng(pos.lng.toFixed(6));
-        setLocationStr(`${pos.lng.toFixed(6)}, ${pos.lat.toFixed(6)}`);
-      } finally {
-        setIsGeocoding(false);
-      }
-    } catch (err: any) {
-      toast.error('定位失败: ' + (err.message || '未知错误'));
-    } finally {
-      setIsLocating(false);
-    }
-  };
 
   const handlePhotoAdd = (files: File[]) => {
     const acceptedFiles: File[] = [];
@@ -608,7 +516,7 @@ const SignDetail = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto touch-pan-y px-6 py-4 space-y-5 custom-scrollbar pb-[calc(40px+var(--sab))]">
+      <div className="flex-1 min-h-0 overflow-y-auto touch-pan-y px-6 py-4 space-y-5 custom-scrollbar pb-safe-6">
         {/* Activity Briefing */}
         <div className="flex items-center justify-between px-1 mt-1">
           <div className="flex items-center gap-4 min-w-0">
@@ -778,7 +686,7 @@ const SignDetail = () => {
             onClick={() => setIsLocationPickerOpen(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 250 }}
-              className="w-full sm:max-w-[420px] rounded-t-[2.5rem] p-4 sm:p-8 overflow-hidden flex flex-col max-h-[80vh]"
+              className="w-full sm:max-w-[460px] md:max-w-[500px] rounded-t-[2.5rem] p-4 sm:p-8 overflow-hidden flex flex-col max-h-[85vh] max-h-[85dvh] sm:max-h-[80vh] sm:max-h-[80dvh]"
               style={{
                 background: 'rgba(255,255,255,0.97)',
                 backdropFilter: 'blur(24px)',
@@ -789,8 +697,8 @@ const SignDetail = () => {
               onClick={(e) => e.stopPropagation()}>
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-4 sm:mb-8 shrink-0" />
               <div className="flex items-center justify-between mb-4 sm:mb-6 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="relative">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative shrink-0">
                     <div className="absolute inset-0 rounded-2xl blur-md opacity-40"
                       style={{ background: 'linear-gradient(135deg, #36D399, #0d9488)' }} />
                     <div className="relative w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg ring-2 ring-emerald-100"
@@ -798,153 +706,56 @@ const SignDetail = () => {
                       <MapPin className="w-5 h-5 text-white" strokeWidth={2.5} />
                     </div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <h3 className="text-lg font-extrabold text-text-primary tracking-tight">选择签到位置</h3>
                     <p className="text-[10px] text-text-muted font-medium">地址库 · 位置签到</p>
                   </div>
                 </div>
                 <button onClick={() => setIsLocationPickerOpen(false)}
-                  className="w-9 h-9 flex items-center justify-center rounded-full transition-all active:scale-90 hover:bg-slate-100"
+                  className="w-9 h-9 flex items-center justify-center rounded-full transition-all active:scale-90 hover:bg-white/80 shrink-0"
                   style={{ color: '#94A3B8' }}>
                   <X size={18} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-[calc(40px+var(--sab))] custom-scrollbar px-1">
-                {/* Live GPS location card */}
-                <motion.div layout
-                  className="relative overflow-hidden rounded-3xl text-white shadow-xl"
-                  style={{
-                    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1 pb-safe-6 custom-scrollbar px-1">
+                {/* 百度地图 Key 配置状态 */}
+                <BMapKeyConfig fullWidth />
+
+                {/* 复用 LiveLocationCard 实时定位卡片 */}
+                <LiveLocationCard
+                  data={{
+                    currentPosition,
+                    geoAddress,
+                    isLocating,
+                    isGeocoding,
+                    locateSuccess,
+                    onLocate: handleLocate,
                   }}
-                >
-                  <div className="absolute top-0 right-0 w-40 h-40 rounded-full -mr-16 -mt-16 pointer-events-none"
-                    style={{ background: 'radial-gradient(circle, rgba(54,211,153,0.2) 0%, transparent 70%)' }} />
-                  <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full -ml-12 -mb-12 pointer-events-none"
-                    style={{ background: 'radial-gradient(circle, rgba(13,148,136,0.15) 0%, transparent 70%)' }} />
+                />
 
-                  <AnimatePresence>
-                    {locateSuccess && (
-                      <motion.div
-                        initial={{ opacity: 0.6, scale: 0.3 }}
-                        animate={{ opacity: 0, scale: 2.5 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 1.2, ease: 'easeOut' }}
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full border-2 pointer-events-none"
-                        style={{ borderColor: 'rgba(54,211,153,0.6)' }}
-                      />
-                    )}
-                  </AnimatePresence>
-
-                  <div className="relative p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h4 className="font-extrabold text-xs flex items-center gap-2">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-                          </span>
-                          实时 GPS 定位
-                        </h4>
-                        <p className="text-[9px] text-slate-400 mt-0.5 font-medium">自动获取当前位置并填入签到坐标</p>
-                      </div>
-                      <motion.button whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.05 }}
-                        onClick={handleLocate} disabled={isLocating}
-                        className={`relative flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-60 ${
-                          currentPosition
-                            ? 'bg-white/15 hover:bg-white/20 text-white backdrop-blur'
-                            : 'text-white shadow-lg'
-                        }`}
-                        style={!currentPosition ? {
-                          background: 'linear-gradient(135deg, #00B42A, #36D399)',
-                          boxShadow: '0 4px 16px rgba(0,180,42,0.35)',
-                        } : {}}
-                      >
-                        {isLocating ? (
-                          <><Loader2 className="w-3 h-3 animate-spin" />定位中…</>
-                        ) : currentPosition ? (
-                          <><Navigation className="w-3 h-3" />重新定位</>
-                        ) : (
-                          <><Navigation className="w-3 h-3" />获取定位</>
-                        )}
-                      </motion.button>
-                    </div>
-
-                    {currentPosition ? (
-                      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
-                        <div className="backdrop-blur rounded-xl p-3 grid grid-cols-2 gap-2 border"
-                          style={{
-                            background: 'rgba(255,255,255,0.08)',
-                            borderColor: 'rgba(255,255,255,0.06)',
-                          }}>
-                          <div>
-                            <div className="text-[9px] text-slate-400 mb-0.5 font-medium tracking-wide">经度 (lng)</div>
-                            <div className="font-mono font-bold text-xs tracking-tight">{currentPosition.lng.toFixed(6)}°</div>
-                          </div>
-                          <div>
-                            <div className="text-[9px] text-slate-400 mb-0.5 font-medium tracking-wide">纬度 (lat)</div>
-                            <div className="font-mono font-bold text-xs tracking-tight">{currentPosition.lat.toFixed(6)}°</div>
-                          </div>
-                        </div>
-
-                        {isGeocoding ? (
-                          <div className="backdrop-blur rounded-xl p-3 flex items-center gap-2 border-dashed"
-                            style={{
-                              background: 'rgba(255,255,255,0.05)',
-                              border: '1px dashed rgba(255,255,255,0.08)',
-                            }}>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                            <span className="text-[10px] text-slate-300">解析地址中…</span>
-                          </div>
-                        ) : geoAddress ? (
-                          <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                            className="backdrop-blur rounded-xl p-3 border"
-                            style={{
-                              background: 'rgba(255,255,255,0.08)',
-                              borderColor: 'rgba(255,255,255,0.06)',
-                            }}>
-                            <p className="text-[11px] font-bold leading-relaxed text-white/95">{geoAddress.formattedAddress}</p>
-                            {geoAddress.poiName && (
-                              <div className="flex items-center gap-1.5 mt-1.5">
-                                <MapPin size={10} className="text-emerald-400" />
-                                <span className="text-[10px] text-emerald-400 font-bold">{geoAddress.poiName}</span>
-                              </div>
-                            )}
-                          </motion.div>
-                        ) : null}
-
-                        <motion.button whileTap={{ scale: 0.95 }}
-                          onClick={() => {
-                            setLat(currentPosition.lat.toFixed(6));
-                            setLng(currentPosition.lng.toFixed(6));
-                            setLocationStr(geoAddress?.formattedAddress || `GPS: ${currentPosition.lng.toFixed(6)}, ${currentPosition.lat.toFixed(6)}`);
-                            setIsLocationPickerOpen(false);
-                            toast.success('已选择当前位置');
-                          }}
-                          className="w-full py-2 rounded-xl text-xs font-bold text-white shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                          style={{
-                            background: 'linear-gradient(135deg, #00B42A, #36D399)',
-                            boxShadow: '0 4px 12px rgba(0,180,42,0.3)',
-                          }}>
-                          <CheckCircle2 size={12} strokeWidth={2.5} /> 使用此位置签到
-                        </motion.button>
-                      </motion.div>
-                    ) : (
-                      <div className="backdrop-blur rounded-xl p-4 text-center border-dashed"
-                        style={{
-                          background: 'rgba(255,255,255,0.04)',
-                          border: '1px dashed rgba(255,255,255,0.08)',
-                        }}>
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2 backdrop-blur"
-                          style={{ background: 'rgba(255,255,255,0.06)' }}>
-                          <Crosshair size={18} className="text-slate-400" />
-                        </div>
-                        <p className="text-[11px] text-slate-300 font-bold">点击获取当前精确位置</p>
-                        <p className="text-[9px] text-slate-500 mt-1">调用 AMap 定位 + 逆地理编码</p>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
+                {/* 定位成功后显示「使用此位置签到」按钮 */}
+                {currentPosition && (
+                  <button
+                    onClick={() => {
+                      setLat(currentPosition.lat.toFixed(6));
+                      setLng(currentPosition.lng.toFixed(6));
+                      setLocationStr(
+                        geoAddress?.formattedAddress
+                        || geoAddress?.poiName
+                        || `${currentPosition.lng.toFixed(6)}, ${currentPosition.lat.toFixed(6)}`
+                      );
+                      setIsLocationPickerOpen(false);
+                      toast.success('已选择当前位置');
+                    }}
+                    className="w-full py-3 rounded-2xl text-sm font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.97] btn-tap"
+                    style={{
+                      background: 'linear-gradient(135deg, #00B42A, #36D399)',
+                      boxShadow: '0 4px 20px rgba(0,180,42,0.3)',
+                    }}
+                  >
+                    <CheckCircle2 size={16} /> 使用此位置签到
+                  </button>
+                )}
 
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -968,7 +779,7 @@ const SignDetail = () => {
                       mode="add"
                       form={newLocForm}
                       onChange={(f: LocationFormData) => setNewLocForm(f)}
-                      onSave={handleAddLocation}
+                      onSave={() => handleAddLocation(newLocForm)}
                       onCancel={() => setIsAddingLocation(false)}
                     />
                   )}
@@ -987,9 +798,9 @@ const SignDetail = () => {
                   </div>
                 )}
 
-                <motion.div whileTap={{ scale: 0.98 }}
+                <div
                   onClick={() => { setLat(''); setLng(''); setLocationStr(''); setIsLocationPickerOpen(false); }}
-                  className={`p-4 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center gap-3 ${
+                  className={`btn-tap p-4 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center gap-3 ${
                     !lat ? 'shadow-md' : 'shadow-sm hover:bg-slate-50 hover:border-slate-200'
                   }`}
                   style={!lat ? {
@@ -1013,9 +824,9 @@ const SignDetail = () => {
                     <div className="text-[10px] text-text-muted font-medium mt-0.5">不发送地理位置信息进行签到</div>
                   </div>
                   {!lat && <CheckCircle2 size={20} className="text-brand-600 shrink-0" />}
-                </motion.div>
+                </div>
 
-                {locationPresets.map((p: LocationPreset, i: number) => {
+                {locationPresets.map((p, i) => {
                   const isSelected = p.lat === lat && p.lng === lng;
                   const isEditing = editingLocation?.id === p.id;
                   const palette = [
@@ -1027,21 +838,20 @@ const SignDetail = () => {
                   ];
                   const color = palette[i % palette.length];
                   return (
-                    <motion.div key={p.id} layout
-                      initial={{ opacity: 0, y: 12, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, x: -40, scale: 0.95 }}
-                      transition={{ delay: i * 0.04, type: 'spring', stiffness: 280, damping: 24 }}
-                      className={`rounded-[1.5rem] border-2 transition-all duration-300 overflow-hidden ${
+                    <div key={p.id}
+                      className={`anim-slide-up rounded-[1.5rem] border-2 transition-all duration-300 overflow-hidden gpu-layer ${
                         isSelected ? 'shadow-md' : 'shadow-sm hover:border-slate-200 hover:shadow-md hover:-translate-y-0.5'
                       }`}
-                      style={isSelected ? {
-                        borderColor: 'rgba(22,93,255,0.3)',
-                        background: 'linear-gradient(135deg, rgba(239,244,255,0.8), rgba(238,242,255,0.8))',
-                        boxShadow: '0 4px 20px rgba(22,93,255,0.12)',
-                      } : {
-                        borderColor: 'rgba(226,232,240,0.4)',
-                        background: 'rgba(255,255,255,0.85)',
+                      style={{
+                        animationDelay: `${i * 0.04}s`,
+                        ...(isSelected ? {
+                          borderColor: 'rgba(22,93,255,0.3)',
+                          background: 'linear-gradient(135deg, rgba(239,244,255,0.8), rgba(238,242,255,0.8))',
+                          boxShadow: '0 4px 20px rgba(22,93,255,0.12)',
+                        } : {
+                          borderColor: 'rgba(226,232,240,0.4)',
+                          background: 'rgba(255,255,255,0.85)',
+                        })
                       }}>
                       {isEditing ? (
                         <LocationForm
@@ -1053,9 +863,9 @@ const SignDetail = () => {
                         />
                       ) : (
                         <div className="flex items-center">
-                          <motion.div whileTap={{ scale: 0.98 }}
+                          <div
                             onClick={() => { setLat(p.lat); setLng(p.lng); setLocationStr(p.description); setIsLocationPickerOpen(false); }}
-                            className="flex-1 min-w-0 p-4 pr-2 cursor-pointer flex items-center gap-3">
+                            className="btn-tap flex-1 min-w-0 p-4 pr-2 cursor-pointer flex items-center gap-3">
                             <div className="relative">
                               <div className="absolute inset-0 rounded-2xl blur-sm opacity-25"
                                 style={{ background: `linear-gradient(135deg, ${color.from}, ${color.to})` }} />
@@ -1072,7 +882,7 @@ const SignDetail = () => {
                               <div className="text-[10px] text-text-muted font-medium font-mono mt-1 tracking-tight">{p.lng}, {p.lat}</div>
                               {p.description && <div className="text-[10px] text-text-muted font-medium truncate mt-0.5 opacity-60">{p.description}</div>}
                             </div>
-                          </motion.div>
+                          </div>
                           {isSelected && <CheckCircle2 size={20} className="text-brand-600 shrink-0 mr-2" />}
                           <div className="flex items-center gap-0.5 pr-2 shrink-0" onClick={e => e.stopPropagation()}>
                             <button onClick={() => { setEditingLocation(p); setIsAddingLocation(false); }}
@@ -1090,7 +900,7 @@ const SignDetail = () => {
                           </div>
                         </div>
                       )}
-                    </motion.div>
+                    </div>
                   );
                 })}
                 {!isLoadingLocations && locationPresets.length === 0 && (
@@ -1121,7 +931,7 @@ const SignDetail = () => {
             style={{ background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
             onClick={() => setShowProgress(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full sm:max-w-[420px] rounded-t-[2.5rem] px-4 sm:px-8 pt-6 sm:pt-10 pb-0 flex flex-col max-h-[85vh] relative"
+              className="w-full sm:max-w-[420px] rounded-t-[2.5rem] px-4 sm:px-8 pt-6 sm:pt-10 pb-0 flex flex-col max-h-[85vh] max-h-[85dvh] relative"
               style={{
                 background: 'rgba(255,255,255,0.97)',
                 backdropFilter: 'blur(24px)',
@@ -1145,7 +955,7 @@ const SignDetail = () => {
                   <X size={18} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-1 pr-2 custom-scrollbar pb-[calc(40px+var(--sab))]">
+              <div className="flex-1 overflow-y-auto space-y-1 pr-2 custom-scrollbar pb-safe-6">
                 <ProgressCard name={currentUser?.name || "本人"} avatar={currentUser?.avatar} mobile={currentUser?.mobile || ""} isHost statusObj={signStatuses[currentUser?.uid || 0]} />
                 {selectedUids.filter(uid => uid !== currentUser?.uid).map(uid => {
                   const student = classmates.find(m => m.uid === uid);

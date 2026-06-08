@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit3, Save, Crosshair } from 'lucide-react';
+import { Plus, Edit3, Save, Crosshair, MapPin } from 'lucide-react';
 import { sanitizeCoord } from '../../utils/coords';
+import BMapPicker from './BMapPicker';
 
 export interface LocationFormData {
   name: string;
@@ -37,6 +38,19 @@ export const LocationForm: React.FC<LocationFormProps> = ({
   onFillGPS,
 }) => {
   const isAdd = mode === 'add';
+  const [showMapPicker, setShowMapPicker] = useState(false);
+
+  const handleMapPick = (lat: number, lng: number, address: string) => {
+    const newForm: LocationFormData = {
+      ...form,
+      lat: lat.toFixed(6),
+      lng: lng.toFixed(6),
+    };
+    if (isAdd) {
+      if (!form.description && address) newForm.description = address;
+    }
+    onChange(newForm);
+  };
 
   const accentColors = isAdd
     ? {
@@ -96,9 +110,9 @@ export const LocationForm: React.FC<LocationFormProps> = ({
         </div>
       </div>
 
-      {/* Name */}
+      {/* Name / 标题 */}
       <input
-        placeholder="位置名称（必填）"
+        placeholder="标题（这是自己看的）"
         value={form.name}
         onChange={(e) => onChange({ ...form, name: e.target.value })}
         className="w-full min-w-0 px-3 sm:px-4 py-3 text-sm border rounded-xl outline-none font-semibold placeholder:text-slate-300 transition-all duration-200 input-glass"
@@ -121,28 +135,46 @@ export const LocationForm: React.FC<LocationFormProps> = ({
           className="flex-1 min-w-0 px-2.5 sm:px-4 py-3 text-[13px] sm:text-sm font-mono border rounded-xl outline-none placeholder:text-slate-300 transition-all duration-200"
           style={{ borderColor: 'rgba(226,232,240,0.8)', background: 'rgba(255,255,255,0.8)' }}
         />
-        {isAdd && onFillGPS && (
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={onFillGPS}
-            disabled={!hasLocation}
-            className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl disabled:opacity-30 flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
-            style={{
-              color: '#00B42A',
-              background: 'rgba(0,180,42,0.08)',
-              border: '1px solid rgba(0,180,42,0.2)',
-            }}
-            title="填入当前定位"
-          >
-            <Crosshair size={14} />
-            <span className="hidden sm:inline text-[11px]">定位</span>
-          </motion.button>
+        {isAdd && (
+          <>
+            {onFillGPS && (
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={onFillGPS}
+                disabled={!hasLocation}
+                className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl disabled:opacity-30 flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
+                style={{
+                  color: '#00B42A',
+                  background: 'rgba(0,180,42,0.08)',
+                  border: '1px solid rgba(0,180,42,0.2)',
+                }}
+                title="填入当前定位"
+              >
+                <Crosshair size={14} />
+                <span className="hidden sm:inline text-[11px]">定位</span>
+              </motion.button>
+            )}
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setShowMapPicker(true)}
+              className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
+              style={{
+                color: '#3388ff',
+                background: 'rgba(51,136,255,0.08)',
+                border: '1px solid rgba(51,136,255,0.2)',
+              }}
+              title="百度地图选点"
+            >
+              <MapPin size={14} />
+              <span className="hidden sm:inline text-[11px]">选点</span>
+            </motion.button>
+          </>
         )}
       </div>
 
-      {/* Description */}
+      {/* Description / 地址名称 */}
       <textarea
-        placeholder="地址描述（可选）"
+        placeholder="地址名称（这是给老师看的）"
         value={form.description}
         onChange={(e) => onChange({ ...form, description: e.target.value })}
         rows={2}
@@ -172,6 +204,15 @@ export const LocationForm: React.FC<LocationFormProps> = ({
           {isAdd ? '保存地址' : '保存修改'}
         </motion.button>
       </div>
+
+      {/* 百度地图选点器 */}
+      <BMapPicker
+        open={showMapPicker}
+        onClose={() => setShowMapPicker(false)}
+        onConfirm={handleMapPick}
+        initialLat={form.lat ? parseFloat(form.lat) : undefined}
+        initialLng={form.lng ? parseFloat(form.lng) : undefined}
+      />
     </motion.div>
   );
 };

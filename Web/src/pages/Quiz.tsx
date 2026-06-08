@@ -653,19 +653,13 @@ export default function Quiz() {
             </div>
           </div>
           {/* Start/Stop button */}
-          <motion.button
-            whileTap={{ scale: 0.94 }}
-            whileHover={{ scale: 1.04 }}
+          <button
             onClick={toggleMonitor}
             disabled={loading.toggle || !isAuthenticated}
-            className={`relative px-5 py-2.5 rounded-2xl font-bold text-sm flex items-center gap-2 transition-all duration-200 disabled:opacity-50 disabled:scale-100 ${
-              status?.running
-                ? 'bg-white/20 text-white hover:bg-white/30 backdrop-blur-sm border border-white/15'
-                : 'bg-white text-brand-600 shadow-xl shadow-black/15 hover:shadow-black/25 border border-white/80'
-            }`}
+            className="btn-tap-sm relative px-5 py-2.5 rounded-2xl font-bold text-sm flex items-center gap-2 transition-all duration-200 disabled:opacity-50 disabled:scale-100"
           >
             {loading.toggle ? <Loader2 className="w-4 h-4 animate-spin" /> : status?.running ? <><Pause className="w-4 h-4" />停止</> : <><Play className="w-4 h-4" />启动监控</>}
-          </motion.button>
+          </button>
         </div>
       </div>
 
@@ -737,59 +731,49 @@ export default function Quiz() {
           <>
             {/* Stats cards — 3 glass cards */}
             <div className="grid grid-cols-3 gap-3">
-              {/* Success */}
-              <motion.div layout
-                className="rounded-2xl p-4 text-center border overflow-hidden relative"
+              <div className="rounded-2xl p-4 text-center border overflow-hidden relative gpu-layer"
                 style={{
                   background: 'rgba(255,255,255,0.85)',
                   backdropFilter: 'blur(12px)',
                   WebkitBackdropFilter: 'blur(12px)',
                   borderColor: 'rgba(0,180,42,0.15)',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-                }}
-              >
+                }}>
                 <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-12 h-1 rounded-full bg-gradient-to-r from-success-400 to-success-500 opacity-40" />
                 <CheckCircle className="w-5 h-5 mx-auto mb-1.5" style={{ color: '#00B42A' }} />
                 <div className="text-2xl font-extrabold animate-count-up" style={{ color: '#00B42A' }}>{displayStats.success}</div>
                 <div className="text-[10px] font-semibold mt-0.5" style={{ color: '#00B42A', opacity: 0.7 }}>成功</div>
-              </motion.div>
-              {/* Failed */}
-              <motion.div layout
-                className="rounded-2xl p-4 text-center border overflow-hidden relative"
+              </div>
+              <div className="rounded-2xl p-4 text-center border overflow-hidden relative gpu-layer"
                 style={{
                   background: 'rgba(255,255,255,0.85)',
                   backdropFilter: 'blur(12px)',
                   WebkitBackdropFilter: 'blur(12px)',
                   borderColor: 'rgba(245,63,63,0.15)',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-                }}
-              >
+                }}>
                 <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-12 h-1 rounded-full bg-gradient-to-r from-error-400 to-error-500 opacity-40" />
                 <XCircle className="w-5 h-5 mx-auto mb-1.5" style={{ color: '#F53F3F' }} />
                 <div className="text-2xl font-extrabold animate-count-up" style={{ color: '#F53F3F' }}>{displayStats.fail}</div>
                 <div className="text-[10px] font-semibold mt-0.5" style={{ color: '#F53F3F', opacity: 0.7 }}>失败</div>
-              </motion.div>
-              {/* Active */}
-              <motion.div layout
-                className="rounded-2xl p-4 text-center border overflow-hidden relative"
+              </div>
+              <div className="rounded-2xl p-4 text-center border overflow-hidden relative gpu-layer"
                 style={{
                   background: 'rgba(255,255,255,0.85)',
                   backdropFilter: 'blur(12px)',
                   WebkitBackdropFilter: 'blur(12px)',
                   borderColor: 'rgba(22,93,255,0.15)',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-                }}
-              >
+                }}>
                 <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-12 h-1 rounded-full bg-gradient-to-r from-brand-400 to-brand-600 opacity-40" />
                 <Activity className="w-5 h-5 mx-auto mb-1.5" style={{ color: '#165DFF' }} />
                 <div className="text-2xl font-extrabold animate-count-up" style={{ color: '#165DFF' }}>{displayStats.active}</div>
                 <div className="text-[10px] font-semibold mt-0.5" style={{ color: '#165DFF', opacity: 0.7 }}>进行中</div>
-              </motion.div>
+              </div>
             </div>
 
             {/* Course info card */}
-            <motion.div layout
-              className="rounded-2xl p-4 flex items-center gap-3 border"
+            <div className="rounded-2xl p-4 flex items-center gap-3 border gpu-layer"
               style={{
                 background: 'rgba(255,255,255,0.85)',
                 backdropFilter: 'blur(12px)',
@@ -810,7 +794,7 @@ export default function Quiz() {
                 style={{ color: '#165DFF', background: 'rgba(22,93,255,0.08)' }}>
                 切换课程
               </button>
-            </motion.div>
+            </div>
 
             {/* Real-time activity list */}
             <div className="rounded-2xl border overflow-hidden"
@@ -941,13 +925,9 @@ export default function Quiz() {
                           const statusColor = isPending ? '#FF7D00' : isSuccess ? '#00B42A' : isFailed ? '#F53F3F' : isActive ? '#165DFF' : '#94A3B8';
 
                           return (
-                            <motion.div
+                            <div
                               key={actId || `${group.label}-${idx}`}
-                              initial={isHighlighted ? { opacity: 0, y: -12 } : false}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ type: "spring", stiffness: 280, damping: 22 }}
-                              layout
-                              className={`relative px-4 py-3.5 flex items-center gap-3 transition-all duration-500 border-b last:border-0 hover:bg-slate-50/60 ${
+                              className={`anim-slide-up relative px-4 py-3.5 flex items-center gap-3 transition-all duration-500 border-b last:border-0 hover:bg-slate-50/60 gpu-layer ${
                                 isHighlighted ? 'bg-gradient-to-r from-emerald-100/80 via-emerald-50/40 to-transparent' :
                                 isPending ? 'bg-gradient-to-r from-amber-50/80 via-amber-50/20 to-transparent' :
                                 isSuccess ? 'bg-gradient-to-r from-emerald-50/50 via-white to-transparent' :
@@ -1044,21 +1024,19 @@ export default function Quiz() {
 
                               {/* Manual answer button */}
                               {!isAnswered && isActive && (
-                                <motion.button
-                                  whileTap={{ scale: 0.92 }}
-                                  whileHover={{ scale: 1.05 }}
+                                <button
                                   onClick={(e) => { e.stopPropagation(); handleManualAnswer(parseInt(actId)); }}
                                   disabled={loading.toggle}
-                                  className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 flex-shrink-0 text-white transition-all disabled:opacity-50 shadow-md"
+                                  className="btn-tap-sm px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 flex-shrink-0 text-white transition-all disabled:opacity-50 shadow-md"
                                   style={{
                                     background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
                                     boxShadow: '0 2px 8px rgba(22,93,255,0.35)',
                                   }}
                                 >
                                   <Zap className="w-3 h-3" />抢答
-                                </motion.button>
+                                </button>
                               )}
-                            </motion.div>
+                            </div>
                           );
                         })}
                       </div>
@@ -1159,9 +1137,9 @@ export default function Quiz() {
                       const cid = course.course_id || course.id;
                       const sel = String(config.course_id) === String(cid) && String(config.class_id) === String(course.class_id);
                       return (
-                        <motion.div key={`${cid}-${course.class_id}`} whileTap={{ scale: 0.98 }}
+                        <div key={`${cid}-${course.class_id}`}
                           onClick={() => { setSelectedCourse(course); setConfig((p: any) => ({ ...p, course_id: cid, class_id: course.class_id })); }}
-                          className={`p-3 rounded-2xl cursor-pointer flex items-center gap-3 transition-all duration-200 ${
+                          className={`btn-tap-sm p-3 rounded-2xl cursor-pointer flex items-center gap-3 transition-all duration-200 ${
                             sel
                               ? 'border-2 shadow-sm'
                               : 'border-2 border-transparent hover:bg-white hover:border-slate-100'
@@ -1186,7 +1164,7 @@ export default function Quiz() {
                           >
                             {sel && <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                           </div>
-                        </motion.div>
+                        </div>
                       );
                     })}
                   </div>
@@ -1320,12 +1298,10 @@ export default function Quiz() {
 
               {/* Save button */}
               <div className="p-4">
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  whileHover={{ scale: 1.02 }}
+                <button
                   onClick={handleSaveConfig}
                   disabled={loading.save}
-                  className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 text-white transition-all duration-200 disabled:opacity-50 shadow-lg"
+                  className="btn-tap w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 text-white transition-all duration-200 disabled:opacity-50 shadow-lg"
                   style={{
                     background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
                     boxShadow: '0 4px 16px rgba(22,93,255,0.3)',
@@ -1337,7 +1313,7 @@ export default function Quiz() {
                       <CheckCircle className="w-4 h-4" />
                     </motion.span>
                   )}
-                </motion.button>
+                </button>
               </div>
             </div>
           </>

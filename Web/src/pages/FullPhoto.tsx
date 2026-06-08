@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Camera, EyeOff, Eye, Loader2 } from 'lucide-react';
+import { ChevronLeft, Camera, EyeOff, Eye, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type NativeCameraBridge = {
@@ -543,53 +543,138 @@ const FullPhoto = () => {
         )}
       </AnimatePresence>
 
-      <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-[calc(24px+var(--sat))] flex items-center justify-between text-white pointer-events-none">
-        <button onClick={() => navigate(-1)} className="p-2 active:opacity-60 transition-opacity pointer-events-auto">
-          <ChevronLeft size={32} />
+      <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-[calc(24px+var(--sat))] pb-3 flex items-center justify-between"
+        style={{
+          background: 'linear-gradient(180deg, rgba(0,0,0,0.5) 0%, transparent 100%)',
+        }}>
+        <button onClick={() => navigate(-1)} className="w-10 h-10 rounded-xl flex items-center justify-center backdrop-blur-md active:scale-90 transition-transform"
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}>
+          <ChevronLeft size={22} className="text-white" />
         </button>
-        <h2 className="text-[20px] font-normal tracking-widest">拍照签到</h2>
-        <button 
+        <h2 className="text-[16px] font-bold tracking-wider text-white/90 drop-shadow-sm">拍照签到</h2>
+        <button
           onClick={handleFinish}
-          className="px-4 py-1.5 bg-blue-600 text-white rounded-full text-sm font-bold shadow-sm pointer-events-auto active:scale-95 transition-transform"
+          className="px-4 py-2 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-transform backdrop-blur-md"
+          style={{
+            background: capturedFiles.length > 0
+              ? 'linear-gradient(135deg, #667eea, #764ba2)'
+              : 'rgba(255,255,255,0.15)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.15)',
+            boxShadow: capturedFiles.length > 0
+              ? '0 4px 16px rgba(102,126,234,0.4)'
+              : 'none',
+          }}
         >
           完成 {capturedFiles.length > 0 && `(${capturedFiles.length})`}
         </button>
       </div>
 
-      <div className="absolute bottom-[calc(48px+var(--sab))] left-0 right-0 z-20 flex flex-col items-center gap-6 px-8">
-        {/* 已经拍完的照片和上传的照片 */}
+      <div className="absolute bottom-[calc(48px+var(--sab))] left-0 right-0 z-20 flex flex-col items-center gap-5 px-6">
+        {/* 已拍照片预览条 — 玻璃卡片 */}
         {capturedPreviews.length > 0 && (
-          <div className="w-full flex items-center gap-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
-            {capturedPreviews.map((url, index) => (
-              <div key={url} className="relative shrink-0 w-16 h-16 rounded-xl border-2 border-white/20 overflow-hidden shadow-lg">
-                <img src={url} className="w-full h-full object-cover" />
-                <button 
-                  onClick={() => removePhoto(index)}
-                  className="absolute top-0 right-0 bg-black/50 text-white p-0.5 rounded-bl-lg"
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-sm"
+          >
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar no-scrollbar px-1"
+              style={{ scrollbarWidth: 'none' }}>
+              {capturedPreviews.map((url, index) => (
+                <motion.div
+                  key={url}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                  className="relative shrink-0 group"
                 >
-                  <ChevronLeft size={12} className="rotate-45" />
-                </button>
-              </div>
-            ))}
-          </div>
+                  <div className="w-[68px] h-[68px] rounded-2xl overflow-hidden shadow-lg ring-2 transition-all duration-200 group-hover:ring-emerald-400"
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                    }}>
+                    <img src={url} className="w-full h-full object-cover" />
+                  </div>
+                  {/* 照片序号 */}
+                  <div className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-md"
+                    style={{
+                      background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                      color: '#fff',
+                      boxShadow: '0 2px 8px rgba(102,126,234,0.4)',
+                    }}>
+                    {index + 1}
+                  </div>
+                  {/* 删除按钮 */}
+                  <button
+                    onClick={() => removePhoto(index)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 active:scale-90 shadow-md"
+                    style={{
+                      background: 'rgba(239,68,68,0.9)',
+                      backdropFilter: 'blur(8px)',
+                      WebkitBackdropFilter: 'blur(8px)',
+                    }}
+                  >
+                    <X size={10} className="text-white" />
+                  </button>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
         )}
 
-        <div className="flex items-center gap-8">
-          <button onClick={() => setShowCameraList(true)} className="w-14 h-14 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg pointer-events-auto">
-            <Camera size={22} />
-          </button>
-          <button 
+        <div className="flex items-center gap-6">
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setShowCameraList(true)}
+            className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md active:scale-90 transition-all"
+            style={{
+              background: 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#fff',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+            }}>
+            <Camera size={20} />
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.9 }}
             onClick={handleCapture}
             disabled={isCapturing}
-            className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform disabled:opacity-50 pointer-events-auto"
+            className="w-[72px] h-[72px] rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform disabled:opacity-50"
+            style={{
+              background: 'linear-gradient(135deg, #fff, #f1f5f9)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+            }}
           >
-            <div className="w-16 h-16 border-4 border-slate-900 rounded-full flex items-center justify-center">
-              {isCapturing ? <Loader2 className="animate-spin text-slate-900" /> : <div className="w-12 h-12 bg-slate-900 rounded-full" />}
+            <div className="w-[56px] h-[56px] rounded-full flex items-center justify-center"
+              style={{
+                border: '3px solid #1e293b',
+                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)',
+              }}>
+              {isCapturing ? (
+                <Loader2 className="animate-spin" size={20} style={{ color: '#1e293b' }} />
+              ) : (
+                <div className="w-[44px] h-[44px] rounded-full" style={{ background: '#1e293b' }} />
+              )}
             </div>
-          </button>
-          <button onClick={() => setIsStealthMode(!isStealthMode)} className={`w-14 h-14 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg transition-opacity pointer-events-auto ${isStealthMode ? 'opacity-20' : ''}`}>
-            {isStealthMode ? <Eye size={22} /> : <EyeOff size={22} />}
-          </button>
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setIsStealthMode(!isStealthMode)}
+            className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md active:scale-90 transition-all"
+            style={{
+              background: isStealthMode
+                ? 'rgba(239,68,68,0.2)'
+                : 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: isStealthMode ? '#ef4444' : '#fff',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+            }}>
+            {isStealthMode ? <EyeOff size={20} /> : <Eye size={20} />}
+          </motion.button>
         </div>
       </div>
 

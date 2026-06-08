@@ -211,19 +211,17 @@ const Courses = () => {
           borderTop: '1px solid rgba(226,232,240,0.4)',
         }}
       >
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          whileHover={{ scale: 1.02 }}
+        <button
           onClick={handleSave}
           disabled={isSaving || isLoading}
-          className="w-full py-4 text-white font-bold rounded-xl shadow-lg transition-all duration-200 disabled:opacity-60 flex items-center justify-center"
+          className="btn-tap w-full py-4 text-white font-bold rounded-xl shadow-lg transition-all duration-200 disabled:opacity-60 flex items-center justify-center"
           style={{
             background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
             boxShadow: '0 4px 20px rgba(22,93,255,0.35)',
           }}
         >
           {isSaving ? <Loader2 className="animate-spin mr-2" /> : '保存设置'}
-        </motion.button>
+        </button>
       </div>
 
       {/* Exit Confirmation Modal */}

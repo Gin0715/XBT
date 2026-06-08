@@ -10,6 +10,9 @@ import { ProgressCard } from '../components/sign/ProgressCard';
 import type { ApiResponse, SignStatusMessage, Classmate, User } from '../types';
 import scanCursor from '../assets/scan_cursor.png';
 import { getLocations, type LocationPreset } from '../api/location';
+import LiveLocationCard from '../components/location/LiveLocationCard';
+import BMapKeyConfig from '../components/location/BMapKeyConfig';
+import { useLocationPanel } from '../hooks/useLocationPanel';
 
 interface QrData {
   enc: string;
@@ -67,11 +70,24 @@ const FullScanner = () => {
     }
   }, [isCameraReady]);
 
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
-  const [locationStr, setLocationStr] = useState('');
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [locationPresets, setLocationPresets] = useState<LocationPreset[]>([]);
+
+  // 实时定位 + 选中位置（统一 Hook 管理）
+  const {
+    currentPosition,
+    geoAddress,
+    isLocating,
+    isGeocoding,
+    locateSuccess,
+    handleLocate,
+    selectedLat: lat,
+    selectedLng: lng,
+    selectedAddress: locationStr,
+    setSelectedLat: setLat,
+    setSelectedLng: setLng,
+    setSelectedAddress: setLocationStr,
+  } = useLocationPanel({ autoFillForm: false });
 
   // 加载位置预设
   useEffect(() => {
@@ -1011,25 +1027,71 @@ const FullScanner = () => {
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8 shrink-0" />
               <div className="flex items-center justify-between mb-6 shrink-0"><h3 className="text-xl font-bold text-slate-900">选择签到位置</h3><button onClick={() => setIsLocationPickerOpen(false)} className="w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-400 rounded-full">✕</button></div>
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-[calc(40px+var(--sab))] custom-scrollbar px-1">
-                <motion.div 
-                  whileTap={{ scale: 0.98 }} 
-                  onClick={() => { setLat(''); setLng(''); setLocationStr(''); setIsLocationPickerOpen(false); }} 
-                  className={`p-5 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center justify-between ${!lat ? 'border-blue-500 bg-blue-50/30' : 'border-slate-50 bg-slate-100/50 hover:bg-white'}`}
+                {/* 百度地图 Key 配置 */}
+                <BMapKeyConfig fullWidth />
+
+                {/* 实时定位卡片 */}
+                <LiveLocationCard
+                  data={{
+                    currentPosition,
+                    geoAddress,
+                    isLocating,
+                    isGeocoding,
+                    locateSuccess,
+                    onLocate: handleLocate,
+                  }}
+                />
+
+                {/* 定位成功后一键填入 */}
+                {currentPosition && (
+                  <button
+                    onClick={() => {
+                      setLat(currentPosition.lat.toFixed(6));
+                      setLng(currentPosition.lng.toFixed(6));
+                      setLocationStr(
+                        geoAddress?.formattedAddress
+                        || geoAddress?.poiName
+                        || `${currentPosition.lng.toFixed(6)}, ${currentPosition.lat.toFixed(6)}`
+                      );
+                      setIsLocationPickerOpen(false);
+                      toast.success('已选择当前位置');
+                    }}
+                    className="w-full py-3 rounded-2xl text-sm font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.97] btn-tap"
+                    style={{
+                      background: 'linear-gradient(135deg, #00B42A, #36D399)',
+                      boxShadow: '0 4px 20px rgba(0,180,42,0.3)',
+                    }}
+                  >
+                    <CheckCircle2 size={16} /> 使用此位置签到
+                  </button>
+                )}
+
+                <div onClick={() => { setLat(''); setLng(''); setLocationStr(''); setIsLocationPickerOpen(false); }}
+                  className="btn-tap p-5 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center justify-between"
+                  style={{
+                    borderColor: !lat ? 'rgba(22,93,255,0.3)' : 'rgba(226,232,240,0.4)',
+                    background: !lat ? 'linear-gradient(135deg, rgba(239,244,255,0.8), rgba(238,242,255,0.8))' : 'rgba(248,250,252,0.5)',
+                  }}
                 >
                   <div className="flex-1 min-w-0 pr-4">
                     <div className="font-bold text-slate-800 text-sm">不使用位置</div>
                     <div className="text-[10px] text-slate-400 font-medium">不发送地理位置信息进行签到</div>
                   </div>
                   {!lat && <CheckCircle2 size={20} className="text-blue-600 shrink-0" />}
-                </motion.div>
+                </div>
 
                 {locationPresets.map((p: LocationPreset) => {
                 const isSelected = p.lat === lat && p.lng === lng;
                 return (
-                  <motion.div key={p.id} whileTap={{ scale: 0.98 }} onClick={() => { setLat(p.lat); setLng(p.lng); setLocationStr(p.description); setIsLocationPickerOpen(false); }} className={`p-5 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center justify-between ${isSelected ? 'border-blue-500 bg-blue-50/30' : 'border-slate-50 bg-slate-50/50 hover:bg-white'}`}>
+                  <div key={p.id} onClick={() => { setLat(p.lat); setLng(p.lng); setLocationStr(p.description); setIsLocationPickerOpen(false); }}
+                    className="p-5 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center justify-between btn-tap"
+                    style={{
+                      borderColor: isSelected ? 'rgba(22,93,255,0.3)' : 'rgba(226,232,240,0.4)',
+                      background: isSelected ? 'linear-gradient(135deg, rgba(239,244,255,0.8), rgba(238,242,255,0.8))' : 'rgba(248,250,252,0.5)',
+                    }}>
                     <div className="flex-1 min-w-0 pr-4"><div className="font-bold text-slate-800 mb-0.5 text-sm">{p.name}</div><div className="text-[10px] text-slate-400 font-medium truncate">{p.description}</div></div>
                     {isSelected && <CheckCircle2 size={20} className="text-blue-600 shrink-0" />}
-                  </motion.div>
+                  </div>
                 );
               })}</div>
             </motion.div>

@@ -238,3 +238,58 @@ DROP TABLE quiz_configs;
 DROP TABLE quiz_activities;
 DROP TABLE quiz_records;
 ```
+
+---
+
+## v2.2 — 2026-06-08
+
+### 新增文件
+
+#### 1. 百度地图 API Key 运行时配置组件
+```
+Web/src/components/location/BMapKeyConfig.tsx
+```
+- 三种模式：compact（状态按钮）、fullWidth（全宽卡片）、默认（内联指示器）
+- 未配置时醒目红框引导，已配置时绿色状态栏
+- 支持显示/隐藏 Key、清除、一键跳转百度开放平台
+
+#### 2. 实时定位卡片
+```
+Web/src/components/location/LiveLocationCard.tsx
+```
+- 精密仪器/航空仪表盘设计语言
+- 深空蓝黑渐变 + 动态光晕 + SVG 网格纹理
+- N/E 角标坐标显示 + 三态切换（空/加载/已定位）
+
+#### 3. 地址库共享 Hook
+```
+Web/src/hooks/useLocationPanel.ts
+```
+- 统一管理 CRUD + GPS 定位 + Key 配置
+- Lobby + SignDetail 共用，移除 ~170 行重复代码
+
+#### 4. 响应式百度地图 Key 管理 Hook
+```
+Web/src/hooks/useBMapKey.ts
+```
+- 三层同步：localStorage 持久化 + storage 事件跨标签页 + 自定义事件同页面
+- 同一页面多个 KeyConfig 实例自动保持状态一致
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `Web/src/utils/bmap.ts` | 新增 `getBMapKey/setBMapKey/clearBMapKey/hasBMapKey/reloadBMapWithKey` |
+| `Web/src/pages/Lobby.tsx` | 改用共享 Hook + 新组件，移除 ~70 行 |
+| `Web/src/pages/SignDetail.tsx` | 同上，移除 ~100 行 |
+| `Web/src/components/sign/PhotoInput.tsx` | 完全重写 — 玻璃效果、hover 预览 |
+| `Web/src/pages/FullPhoto.tsx` | 玻璃效果顶部栏 + 照片预览条优化 |
+| `Web/src/index.css` | 新增 10+ 性能 CSS 工具类 + 6 种玻璃效果类 |
+
+### 文件统计
+
+| 类型 | 数量 | 说明 |
+|------|------|------|
+| 新增文件 | 4 | BMapKeyConfig, LiveLocationCard, useLocationPanel, useBMapKey |
+| 修改文件 | 6 | bmap, Lobby, SignDetail, PhotoInput, FullPhoto, index.css |
+| **总计** | **10** | 本次变更 |

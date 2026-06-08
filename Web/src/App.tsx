@@ -66,7 +66,8 @@ function App() {
           },
         }}
       />
-      <div className="h-screen h-[100dvh] text-text-primary font-sans selection:bg-brand-100 overflow-hidden min-h-0 relative">
+      <div className="h-screen h-[100dvh] text-text-primary font-sans selection:bg-brand-100 overflow-hidden min-h-0 relative"
+        style={{ minHeight: '-webkit-fill-available' }}>
         {/* Background gradient with subtle texture */}
         <div className="fixed inset-0 -z-10 pointer-events-none" style={{
           background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #f1f5f9 100%)',

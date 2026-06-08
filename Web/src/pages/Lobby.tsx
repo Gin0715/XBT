@@ -31,10 +31,9 @@ import { useAuthStore } from '../store/auth';
 import { getChineseStringByDatetime } from '../utils/datetime';
 import type { ApiResponse, CourseActivities } from '../types';
 import PullToRefresh from '../components/PullToRefresh';
-import { getLocations, createLocation, updateLocation, deleteLocation, type LocationPreset } from '../api/location';
-import { getCurrentPosition, reverseGeocode, type AMapAddress } from '../utils/amap';
-import { validateCoord } from '../utils/coords';
-import { LocationForm, type LocationFormData } from '../components/location/LocationForm';
+import { useLocationPanel, type LocationFormData } from '../hooks/useLocationPanel';
+import { LocationForm } from '../components/location/LocationForm';
+import BMapKeyConfig from '../components/location/BMapKeyConfig';
 
 type PendingActivityEntry = {
   activity: CourseActivities['activities'][number];
@@ -118,86 +117,31 @@ const Lobby = () => {
   const [pendingEntry, setPendingEntry] = useState<PendingActivityEntry | null>(null);
 
   const [isLocationPanelOpen, setIsLocationPanelOpen] = useState(false);
-  const [locationPresets, setLocationPresets] = useState<LocationPreset[]>([]);
-  const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
-  const [geoAddress, setGeoAddress] = useState<AMapAddress | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
-  const [isGeocoding, setIsGeocoding] = useState(false);
-  const [editingLoc, setEditingLoc] = useState<LocationPreset | null>(null);
-  const [isAddingLoc, setIsAddingLoc] = useState(false);
-  const [locForm, setLocForm] = useState({ name: '', lat: '', lng: '', description: '' });
-  const [locateSuccess, setLocateSuccess] = useState(false);
+
+  const {
+    locationPresets,
+    fetchLocations,
+    currentPosition,
+    geoAddress,
+    isLocating,
+    isGeocoding,
+    locateSuccess,
+    handleLocate,
+    isAddingLocation: isAddingLoc,
+    setIsAddingLocation: setIsAddingLoc,
+    editingLocation: editingLoc,
+    setEditingLocation: setEditingLoc,
+    newLocationForm: locForm,
+    setNewLocationForm: setLocForm,
+    handleAddLocation,
+    handleUpdateLocation,
+    handleDeleteLocation,
+  } = useLocationPanel({ autoFillForm: true });
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-
-  const fetchLocations = async () => {
-    try {
-      const res = await getLocations();
-      const data = (res.data as any)?.data || res.data || [];
-      setLocationPresets(Array.isArray(data) ? data : []);
-    } catch (e) {}
-  };
-
-  const handleLocate = async () => {
-    setIsLocating(true);
-    setGeoAddress(null);
-    setLocateSuccess(false);
-    try {
-      const pos = await getCurrentPosition();
-      setCurrentPosition(pos);
-      setLocForm(f => ({ ...f, lat: pos.lat.toFixed(6), lng: pos.lng.toFixed(6) }));
-      setLocateSuccess(true);
-      setTimeout(() => setLocateSuccess(false), 1500);
-      toast.success('定位成功');
-
-      setIsGeocoding(true);
-      try {
-        const addr = await reverseGeocode(pos.lat, pos.lng);
-        setGeoAddress(addr);
-        if (!locForm.name && addr.poiName) setLocForm(f => ({ ...f, name: addr.poiName }));
-        if (!locForm.description && addr.formattedAddress) setLocForm(f => ({ ...f, description: addr.formattedAddress }));
-      } catch { /* 逆地理编码失败不报错 */ }
-      finally { setIsGeocoding(false); }
-    } catch (err: any) {
-      toast.error('定位失败: ' + (err.message || '未知错误'));
-    } finally {
-      setIsLocating(false);
-    }
-  };
-
-  const handleAddLocation = async () => {
-    if (!locForm.name || !locForm.lat || !locForm.lng) { toast.error('请填写名称和坐标'); return; }
-    const coordCheck = validateCoord(locForm.lat, locForm.lng);
-    if (!coordCheck.valid) { toast.error(coordCheck.error!); return; }
-    try {
-      const res = await createLocation(locForm);
-      const created = (res.data as any)?.data || res.data;
-      setLocationPresets(p => [...p, created]);
-      setLocForm({ name: '', lat: '', lng: '', description: '' });
-      setIsAddingLoc(false);
-      toast.success('地址已添加');
-    } catch (e: any) { toast.error(e.message || '添加失败'); }
-  };
-
-  const handleUpdateLocation = async (preset: LocationPreset) => {
-    const coordCheck = validateCoord(preset.lat, preset.lng);
-    if (!coordCheck.valid) { toast.error(coordCheck.error!); return; }
-    try {
-      await updateLocation(preset.id, { name: preset.name, lat: preset.lat, lng: preset.lng, description: preset.description });
-      setLocationPresets(p => p.map(l => l.id === preset.id ? preset : l));
-      setEditingLoc(null);
-      toast.success('已更新');
-    } catch (e: any) { toast.error(e.message || '更新失败'); }
-  };
-
-  const handleDeleteLocation = async (id: number) => {
-    if (!confirm('删除该地址？')) return;
-    try { await deleteLocation(id); setLocationPresets(p => p.filter(l => l.id !== id)); toast.success('已删除'); }
-    catch (e: any) { toast.error(e.message || '删除失败'); }
-  };
 
   const fetchActivities = useCallback(async () => {
     if (isLoading) return;
@@ -279,10 +223,9 @@ const Lobby = () => {
       >
         <div className="flex items-center justify-between w-full">
           {/* User info */}
-          <motion.div
-            whileTap={{ scale: 0.94 }}
+          <div
             onClick={() => navigate('/accounts')}
-            className="flex items-center space-x-3 cursor-pointer group"
+            className="btn-tap-sm flex items-center space-x-3 cursor-pointer group"
           >
             <div className="w-11 h-11 rounded-2xl overflow-hidden flex-shrink-0 ring-2 ring-white shadow-sm"
               style={{ border: '2px solid rgba(255,255,255,0.8)' }}>
@@ -302,62 +245,52 @@ const Lobby = () => {
               </h2>
               <p className="text-xs text-text-secondary font-medium">{user?.mobile}</p>
             </div>
-          </motion.div>
+          </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-0.5">
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              whileHover={{ scale: 1.08 }}
+          <div className="flex items-center gap-0.5 sm:gap-0.5 -mr-1 sm:mr-0">
+            <button
               onClick={() => { setIsLocationPanelOpen(true); fetchLocations(); }}
-              className="p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-100/50"
               style={{ color: '#00B42A' }}
               title="地址库"
             >
               <MapPin size={20} />
-            </motion.button>
+            </button>
 
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              whileHover={{ scale: 1.08 }}
+            <button
               onClick={() => navigate('/quiz')}
-              className="p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-100/50"
               style={{ color: '#FF7D00' }}
               title="抢答功能"
             >
               <Zap size={20} />
-            </motion.button>
+            </button>
 
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              whileHover={{ scale: 1.08 }}
+            <button
               onClick={() => navigate('/courses')}
-              className="p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary"
+              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary hover:bg-slate-100/50"
               title="课程配置"
             >
               <Settings size={20} />
-            </motion.button>
+            </button>
 
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              whileHover={{ scale: 1.08 }}
+            <button
               onClick={fetchActivities}
-              className="p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary"
+              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary hover:bg-slate-100/50"
               title="刷新活动"
             >
               <RefreshIndicator spinning={isLoading} />
-            </motion.button>
+            </button>
 
             {user && user.permission >= 2 && (
-              <motion.button
-                whileTap={{ scale: 0.92 }}
-                whileHover={{ scale: 1.08 }}
+              <button
                 onClick={() => navigate('/admin/whitelist')}
-                className="p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary"
+                className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary hover:bg-slate-100/50"
                 title="白名单管理"
               >
                 <ShieldCheck size={20} />
-              </motion.button>
+              </button>
             )}
           </div>
         </div>
@@ -369,7 +302,7 @@ const Lobby = () => {
         isRefreshing={isLoading}
         className="p-4"
       >
-        <div className="pb-[calc(80px+var(--sab))] space-y-4">
+        <div className="pb-safe-8 space-y-4">
           {isLoading && activities.length === 0 ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
@@ -386,8 +319,7 @@ const Lobby = () => {
               ))}
             </div>
           ) : !isLoading && activities.length === 0 ? (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center justify-center py-20 rounded-3xl border border-dashed shadow-sm"
+            <div className="flex flex-col items-center justify-center py-20 rounded-3xl border border-dashed shadow-sm anim-fade-in"
               style={{
                 borderColor: 'rgba(226,232,240,0.6)',
                 background: 'rgba(255,255,255,0.7)',
@@ -408,19 +340,17 @@ const Lobby = () => {
               <p className="font-semibold text-sm" style={{ color: '#94A3B8' }}>暂无正在进行的签到</p>
               <p className="text-xs mt-1.5" style={{ color: '#c0c8d4' }}>下拉刷新或点击右上角刷新按钮获取最新活动</p>
               {/* Quick action button */}
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                whileHover={{ scale: 1.03 }}
+              <button
                 onClick={() => navigate('/courses')}
-                className="mt-6 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-lg transition-all duration-200"
+                className="btn-tap mt-6 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-lg transition-all duration-200"
                 style={{
                   background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
                   boxShadow: '0 4px 16px rgba(22,93,255,0.3)',
                 }}
               >
                 添加课程
-              </motion.button>
-            </motion.div>
+              </button>
+            </div>
           ) : (
             <LayoutGroup>
               {activities.map((course) => {
@@ -435,18 +365,16 @@ const Lobby = () => {
                   : null;
 
                 return (
-                  <motion.div
-                    layout
-                    key={key}
-                    className="card-glass overflow-hidden"
-                  >
-                    {/* Course Header */}
-                    <motion.div
-                      layout="position"
-                      onClick={() => toggleCourse(course.course_id, course.class_id)}
-                      className={`p-4 flex items-center justify-between cursor-pointer transition-colors ${
-                        isExpanded ? 'bg-slate-50/50' : ''
-                      }`}
+                  <div
+                  key={key}
+                  className="card-glass overflow-hidden gpu-layer"
+                >
+                  {/* Course Header */}
+                  <div
+                    onClick={() => toggleCourse(course.course_id, course.class_id)}
+                    className={`btn-tap-sm p-4 flex items-center justify-between cursor-pointer transition-colors ${
+                      isExpanded ? 'bg-slate-50/50' : ''
+                    }`}
                     >
                       <div className="flex items-center space-x-4 flex-1 min-w-0">
                         <div className="relative flex-shrink-0">
@@ -484,25 +412,20 @@ const Lobby = () => {
                           </div>
                         </div>
                       </div>
-                      <motion.div
-                        animate={{ rotate: isExpanded ? 180 : 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="text-slate-300 flex items-center ml-2 flex-shrink-0"
+                      <div
+                        className="text-slate-300 flex items-center ml-2 flex-shrink-0 transition-transform duration-200"
+                        style={{ transform: `rotate(${isExpanded ? 180 : 0}deg)` }}
                       >
                         <ChevronDown size={20} />
-                      </motion.div>
-                    </motion.div>
+                      </div>
+                  </div>
 
-                    {/* Activities List */}
-                    <AnimatePresence initial={false}>
-                      {isExpanded && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2, ease: "circOut" }}
-                          className="overflow-hidden"
-                        >
+                  {/* Activities List */}
+                      <div
+                        className={`overflow-hidden transition-all duration-300 ease-out ${
+                          isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
+                        }`}
+                      >
                           <div className="px-4 pb-4 space-y-2 border-t pt-3"
                             style={{ borderColor: 'rgba(226,232,240,0.4)' }}>
                             {course.activities.length > 0 ? (
@@ -520,13 +443,10 @@ const Lobby = () => {
                                 }
 
                                 return (
-                                  <motion.div
+                                  <div
                                     key={activity.active_id}
-                                    layout
-                                    whileTap={{ scale: 0.97 }}
-                                    whileHover={{ scale: 1.01 }}
                                     onClick={() => handleActivityClick(activity, course, shouldHighlight)}
-                                    className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all group cursor-pointer ${
+                                    className={`btn-tap flex items-center justify-between p-3.5 rounded-2xl border transition-all group cursor-pointer gpu-layer ${
                                       shouldHighlight
                                         ? 'shadow-md'
                                         : 'hover:bg-white hover:border-slate-200 hover:shadow-sm'
@@ -534,7 +454,6 @@ const Lobby = () => {
                                     style={shouldHighlight ? {
                                       background: 'linear-gradient(135deg, rgba(114,46,209,0.06), rgba(167,139,250,0.04))',
                                       borderColor: 'rgba(114,46,209,0.25)',
-                                      boxShadow: '0 4px 16px rgba(114,46,209,0.1)',
                                     } : {
                                       background: 'rgba(248,250,252,0.5)',
                                       borderColor: 'rgba(226,232,240,0.4)',
@@ -548,32 +467,32 @@ const Lobby = () => {
                                       </div>
                                       <div className="flex-1 min-w-0">
                                         <div className="font-bold text-sm truncate text-text-primary">{activity.activity_name}</div>
-                                        <div className="flex items-center space-x-2 mt-0.5 overflow-hidden">
-                                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold uppercase flex-shrink-0"
+                                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold uppercase shrink-0"
                                             style={{ background: 'rgba(22,93,255,0.08)', color: '#165DFF' }}>
                                             {getSignTypeName(activity.sign_type)}
                                           </span>
                                           {shouldHighlight && (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold whitespace-nowrap flex-shrink-0"
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold whitespace-nowrap shrink-0"
                                               style={{ background: 'rgba(114,46,209,0.08)', color: '#722ED1' }}>
                                               进行中 {countdownStr}
                                             </span>
                                           )}
                                           {activity.record_source_name && (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold truncate flex-shrink min-w-0"
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold truncate max-w-[120px] sm:max-w-[200px]"
                                               style={{ background: 'rgba(0,180,42,0.08)', color: '#15803d' }}>
                                               {getSignState(activity.record_source, activity.record_source_name)}
                                             </span>
                                           )}
-                                          <span className="text-[10px] flex items-center flex-shrink-0 text-text-muted">
-                                            <Clock size={10} className="mr-1" />
+                                          <span className="text-[10px] flex items-center shrink-0 text-text-muted">
+                                            <Clock size={10} className="mr-0.5" />
                                             {getChineseStringByDatetime(activity.start_time)}
                                           </span>
                                         </div>
                                       </div>
                                     </div>
                                     <ChevronRight size={18} className="text-slate-300 group-hover:text-brand-500 transition-colors ml-2 flex-shrink-0" />
-                                  </motion.div>
+                                  </div>
                                 );
                               })
                             ) : (
@@ -593,10 +512,8 @@ const Lobby = () => {
                               </div>
                             )}
                           </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
+                    </div>
+                </div>
                 );
               })}
             </LayoutGroup>
@@ -681,24 +598,17 @@ const Lobby = () => {
           >
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-              className="w-full sm:max-w-[420px] rounded-t-[2.5rem] overflow-hidden flex flex-col max-h-[88vh]"
-              style={{
-                background: 'rgba(255,255,255,0.97)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                boxShadow: '0 -8px 40px rgba(0,0,0,0.12)',
-                border: '1px solid rgba(255,255,255,0.4)',
-              }}
+              className="w-full sm:max-w-[460px] md:max-w-[500px] rounded-t-[2.5rem] overflow-hidden flex flex-col max-h-[85vh] max-h-[85dvh] sm:max-h-[80vh] sm:max-h-[80dvh] md:max-h-[75vh] md:max-h-[75dvh] glass-sheet"
               onClick={e => e.stopPropagation()}
             >
               {/* Drag handle */}
               <div className="w-10 h-1.5 bg-slate-200 rounded-full mx-auto mt-4 shrink-0" />
 
               {/* Header */}
-              <div className="px-6 pt-4 pb-2 shrink-0">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
+              <div className="px-6 pt-4 pb-1 shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="relative shrink-0">
                       <div className="absolute inset-0 rounded-2xl blur-md opacity-40"
                         style={{ background: 'linear-gradient(135deg, #36D399, #0d9488)' }} />
                       <div className="relative w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg ring-2 ring-emerald-100"
@@ -706,23 +616,25 @@ const Lobby = () => {
                         <MapPin className="w-5 h-5 text-white" strokeWidth={2.5} />
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="text-lg font-extrabold text-text-primary tracking-tight">地址库</h3>
-                      <p className="text-[10px] text-text-muted font-medium">高德地图 · 签到位置管理</p>
+                      <p className="text-[10px] text-text-muted font-medium">签到位置 · 预设管理</p>
                     </div>
                   </div>
                   <button onClick={() => { setIsLocationPanelOpen(false); setEditingLoc(null); setIsAddingLoc(false); }}
-                    className="w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 active:scale-90 hover:bg-slate-100"
+                    className="w-9 h-9 flex items-center justify-center rounded-full transition-all duration-200 active:scale-90 hover:bg-white/80 shrink-0"
                     style={{ color: '#94A3B8' }}>
                     <X size={18} />
                   </button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-6 pb-[calc(24px+var(--sab))] space-y-5 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-safe-6 space-y-4 custom-scrollbar">
+                {/* 百度地图 Key 配置状态 */}
+                <BMapKeyConfig fullWidth />
+
                 {/* Live location card */}
-                <motion.div layout
-                  className="relative overflow-hidden rounded-3xl text-white shadow-xl"
+                <div className="relative overflow-hidden rounded-3xl text-white shadow-xl gpu-layer"
                   style={{
                     background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
                     boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
@@ -760,18 +672,17 @@ const Lobby = () => {
                           </span>
                           实时定位
                         </h4>
-                        <p className="text-[10px] text-slate-400 mt-0.5 font-medium">AMap · Geolocation + Geocoder</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5 font-medium">BMap · Geolocation + Geocoder</p>
                       </div>
-                      <motion.button whileTap={{ scale: 0.9 }} whileHover={{ scale: 1.05 }}
+                      <button
                         onClick={handleLocate} disabled={isLocating}
-                        className={`relative flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-60 ${
+                        className={`relative flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-60 btn-tap-sm ${
                           currentPosition
                             ? 'bg-white/15 hover:bg-white/20 text-white backdrop-blur'
-                            : 'text-white shadow-lg'
+                            : 'text-white shadow-lg btn-pulse-green'
                         }`}
                         style={!currentPosition ? {
                           background: 'linear-gradient(135deg, #00B42A, #36D399)',
-                          boxShadow: '0 4px 16px rgba(0,180,42,0.35)',
                         } : {}}
                       >
                         {isLocating ? (
@@ -781,11 +692,11 @@ const Lobby = () => {
                         ) : (
                           <><Navigation className="w-3.5 h-3.5" />获取定位</>
                         )}
-                      </motion.button>
+                      </button>
                     </div>
 
                     {currentPosition ? (
-                      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+                      <div className="space-y-3 anim-slide-up">
                         <div className="backdrop-blur rounded-2xl p-3.5 grid grid-cols-2 gap-3 border"
                           style={{
                             background: 'rgba(255,255,255,0.08)',
@@ -802,61 +713,49 @@ const Lobby = () => {
                         </div>
 
                         {isGeocoding ? (
-                          <div className="backdrop-blur rounded-2xl p-4 flex items-center gap-3 border-dashed"
+                          <div className="backdrop-blur rounded-2xl p-3.5 flex items-center gap-3 border gpu-layer"
                             style={{
-                              background: 'rgba(255,255,255,0.05)',
-                              border: '1px dashed rgba(255,255,255,0.08)',
+                              background: 'rgba(255,255,255,0.06)',
+                              borderColor: 'rgba(255,255,255,0.08)',
+                              minHeight: '56px',
                             }}>
-                            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+                            <div className="w-7 h-7 rounded-xl flex items-center justify-center"
                               style={{ background: 'rgba(0,180,42,0.2)' }}>
-                              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                              <div className="w-3.5 h-3.5 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 animate-spin" />
                             </div>
                             <div>
                               <p className="text-xs font-bold text-slate-300">正在解析地址…</p>
-                              <p className="text-[10px] text-slate-500 mt-0.5">高德逆地理编码查询中</p>
+                              <p className="text-[9px] text-slate-500 mt-0.5">逆地理编码查询中</p>
                             </div>
                           </div>
                         ) : geoAddress ? (
-                          <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                            className="backdrop-blur rounded-2xl p-4 space-y-3 border"
+                          <div className="backdrop-blur rounded-2xl p-3.5 border gpu-layer"
                             style={{
                               background: 'rgba(255,255,255,0.08)',
                               borderColor: 'rgba(255,255,255,0.06)',
                             }}>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[10px] px-2 py-0.5 rounded-md font-bold tracking-wide"
-                                style={{ background: 'rgba(0,180,42,0.25)', color: '#6ee7b7' }}>
-                                逆地理编码
-                              </span>
-                              {geoAddress.adcode && <span className="text-[10px] text-slate-400 font-mono">{geoAddress.adcode}</span>}
-                              {geoAddress.city && <span className="text-[10px] text-slate-400 font-medium">{geoAddress.city}</span>}
+                            <div className="flex items-center gap-2 mb-2">
+                              <MapPin size={12} className="text-emerald-400 shrink-0" />
+                              <span className="text-sm font-bold leading-snug text-white/95">{geoAddress.formattedAddress}</span>
                             </div>
-                            <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                              <p className="text-sm font-bold leading-relaxed text-white/95">{geoAddress.formattedAddress}</p>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5 text-[10px]">
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                               {geoAddress.poiName && (
-                                <span className="px-2 py-1 rounded-lg font-bold flex items-center gap-1"
-                                  style={{ background: 'rgba(255,255,255,0.08)', color: '#6ee7b7' }}>
-                                  <MapPin size={10} />{geoAddress.poiName}
+                                <span className="px-2 py-0.5 rounded-md font-semibold flex items-center gap-1"
+                                  style={{ background: 'rgba(0,180,42,0.2)', color: '#6ee7b7' }}>
+                                  <MapPin size={9} />{geoAddress.poiName}
                                 </span>
                               )}
                               {geoAddress.district && (
-                                <span className="px-2 py-1 rounded-lg text-slate-300"
+                                <span className="px-2 py-0.5 rounded-md text-slate-400"
                                   style={{ background: 'rgba(255,255,255,0.06)' }}>{geoAddress.district}</span>
                               )}
-                              {geoAddress.township && (
-                                <span className="px-2 py-1 rounded-lg text-slate-300"
-                                  style={{ background: 'rgba(255,255,255,0.06)' }}>{geoAddress.township}</span>
-                              )}
-                              {geoAddress.street && (
-                                <span className="px-2 py-1 rounded-lg text-slate-300"
-                                  style={{ background: 'rgba(255,255,255,0.06)' }}>{geoAddress.street}{geoAddress.number}</span>
+                              {(geoAddress.city || geoAddress.adcode) && (
+                                <span className="text-slate-500">{geoAddress.city}{geoAddress.adcode ? ` · ${geoAddress.adcode}` : ''}</span>
                               )}
                             </div>
-                          </motion.div>
+                          </div>
                         ) : null}
-                      </motion.div>
+                      </div>
                     ) : (
                       <div className="backdrop-blur rounded-2xl p-6 text-center border-dashed"
                         style={{
@@ -868,11 +767,11 @@ const Lobby = () => {
                           <Crosshair size={24} className="text-slate-400" />
                         </div>
                         <p className="text-sm text-slate-300 font-bold">点击获取当前精确位置</p>
-                        <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">自动调用高德逆地理编码<br />获取详细结构化地址</p>
+                        <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">自动调用百度逆地理编码<br />获取详细结构化地址</p>
                       </div>
                     )}
                   </div>
-                </motion.div>
+                </div>
 
                 {/* Address management toolbar */}
                 <div className="flex items-center justify-between">
@@ -882,15 +781,15 @@ const Lobby = () => {
                       <span className="text-xs text-text-muted font-bold">{locationPresets.length} 个已保存</span>
                     </div>
                   </div>
-                  <motion.button whileTap={{ scale: 0.95 }} whileHover={{ scale: 1.03 }}
+                  <button
                     onClick={() => { setIsAddingLoc(true); setEditingLoc(null); setLocForm({ name: '', lat: '', lng: '', description: '' }); }}
-                    className="flex items-center gap-1.5 text-xs font-bold text-white px-4 py-2.5 rounded-xl shadow-lg transition-all duration-200"
+                    className="flex items-center gap-1.5 text-xs font-bold text-white px-4 py-2.5 rounded-xl shadow-lg transition-all duration-200 btn-tap-sm"
                     style={{
                       background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
                       boxShadow: '0 4px 16px rgba(22,93,255,0.3)',
                     }}>
                     <Plus size={14} strokeWidth={2.5} />新增地址
-                  </motion.button>
+                  </button>
                 </div>
 
                 {/* Add form */}
@@ -900,7 +799,7 @@ const Lobby = () => {
                       mode="add"
                       form={locForm}
                       onChange={(f: LocationFormData) => setLocForm(f)}
-                      onSave={handleAddLocation}
+                      onSave={() => handleAddLocation(locForm)}
                       onCancel={() => setIsAddingLoc(false)}
                       hasLocation={!!currentPosition}
                       onFillGPS={() => {
@@ -924,7 +823,7 @@ const Lobby = () => {
                       ];
                       const color = palette[i % palette.length];
                       return (
-                        <motion.div key={p.id} layout
+                        <motion.div key={p.id}
                           initial={{ opacity: 0, y: 16, scale: 0.97 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, x: -60, scale: 0.95 }}
@@ -971,18 +870,18 @@ const Lobby = () => {
                                   )}
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0">
-                                  <motion.button whileTap={{ scale: 0.85 }}
+                                  <button
                                     onClick={(e) => { e.stopPropagation(); setEditingLoc(p); setIsAddingLoc(false); }}
-                                    className="p-2.5 text-slate-400 hover:text-brand-600 rounded-xl transition-colors active:scale-90"
+                                    className="p-2.5 text-slate-400 hover:text-brand-600 rounded-xl transition-colors active:scale-90 btn-tap-sm"
                                     style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     <Edit3 size={14} />
-                                  </motion.button>
-                                  <motion.button whileTap={{ scale: 0.85 }}
+                                  </button>
+                                  <button
                                     onClick={(e) => { e.stopPropagation(); handleDeleteLocation(p.id); }}
-                                    className="p-2.5 text-slate-400 hover:text-error-500 rounded-xl transition-colors active:scale-90"
+                                    className="p-2.5 text-slate-400 hover:text-error-500 rounded-xl transition-colors active:scale-90 btn-tap-sm"
                                     style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     <Trash2 size={14} />
-                                  </motion.button>
+                                  </button>
                                 </div>
                               </div>
                             </div>
