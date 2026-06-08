@@ -7,6 +7,8 @@ import toast from 'react-hot-toast';
 import client from '../api/client';
 import { useAuthStore } from '../store/auth';
 import { ProgressCard } from '../components/sign/ProgressCard';
+import { Button } from '../components/ui/Button';
+import { IconButton } from '../components/ui/IconButton';
 import type { ApiResponse, SignStatusMessage, Classmate, User } from '../types';
 import scanCursor from '../assets/scan_cursor.png';
 import LiveLocationCard from '../components/location/LiveLocationCard';
@@ -847,9 +849,12 @@ const FullScanner = () => {
       </AnimatePresence>
 
       <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-[calc(24px+var(--sat))] pb-6 flex items-center justify-center text-white pointer-events-none">
-        <button onClick={() => navigate(-1)} className="top-[calc(24px+var(--sat))] left-4 absolute active:opacity-60 transition-opacity pointer-events-auto">
-          <ChevronLeft size={32} strokeWidth={1.5} strokeLinecap="square" strokeLinejoin="miter" />
-        </button>
+        <IconButton
+          icon={<ChevronLeft size={32} strokeWidth={1.5} strokeLinecap="square" strokeLinejoin="miter" />}
+          label="返回"
+          className="top-[calc(24px+var(--sat))] left-4 absolute pointer-events-auto text-white"
+          onClick={() => navigate(-1)}
+        />
         <h2 className="text-[20px] font-normal tracking-widest">扫一扫</h2>
       </div>
 
@@ -942,12 +947,12 @@ const FullScanner = () => {
                   </div>
                   {latestQrData && <p className="text-[9px] text-blue-600 font-bold mt-0.5 tracking-tighter text-ellipsis">Enc: {latestQrData.enc}</p>}
                 </div>
-                <button 
-                  onClick={() => isAllSuccess ? navigate(-1) : closePopup()} 
+                <Button
+                  onClick={() => isAllSuccess ? navigate(-1) : closePopup()}
                   className={isAllSuccess ? "px-4 py-1.5 bg-blue-600 text-white rounded-full text-sm font-bold shadow-sm" : "w-8 h-8 flex items-center justify-center bg-slate-900/5 text-slate-400 rounded-full hover:bg-slate-900/10 transition-colors"}
                 >
                   {isAllSuccess ? "完成" : "✕"}
-                </button>
+                </Button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 pb-[calc(20px+var(--sab))] space-y-1 custom-scrollbar">
                 {orderedTargetUids.map(uid => {
@@ -976,43 +981,54 @@ const FullScanner = () => {
           <AnimatePresence initial={false}>
             {!isStealthMode && !isExecuting && (
               <>
-                <motion.button 
+                <motion.div 
                   initial={{ x: -120, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
                   exit={{ x: -120, opacity: 0 }}
                   transition={{ ease: "easeInOut", duration: 0.3, delay: 0.1 }}
-                  type="button" 
-                  onClick={() => { setIsLocationPickerOpen(true); fetchLocations(); }}
                   className="flex flex-col items-center space-y-2 group pointer-events-auto active:scale-95 transition-transform"
                 >
-                  <div className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors ${lat ? 'bg-blue-600 text-white' : 'bg-black/40 text-white'}`}>
+                  <Button
+                    type="button"
+                    onClick={() => { setIsLocationPickerOpen(true); fetchLocations(); }}
+                    className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors ${lat ? 'bg-blue-600 text-white' : 'bg-black/40 text-white'}`}
+                  >
                     <MapPin size={22} />
-                  </div>
+                  </Button>
                   <span className="text-[10px] text-white/80 font-bold tracking-wider truncate max-w-[60px]">
                     {lat ? locationPresets.find((p) => p.lat === lat)?.name || "位置" : "位置"}
                   </span>
-                </motion.button>
+                </motion.div>
 
-                <motion.button 
+                <motion.div 
                   initial={{ x: -120, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
                   exit={{ x: -120, opacity: 0 }}
                   transition={{ ease: "easeInOut", duration: 0.3 }}
-                  type="button" 
-                  onClick={() => setShowCameraList(true)} 
                   className="flex flex-col items-center space-y-2 group pointer-events-auto active:scale-95 transition-transform"
                 >
-                  <div className="w-14 h-14 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg"><Camera size={22} /></div>
+                  <Button
+                    type="button"
+                    onClick={() => setShowCameraList(true)}
+                    className="w-14 h-14 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg"
+                  >
+                    <Camera size={22} />
+                  </Button>
                   <span className="text-[10px] text-white/80 font-bold tracking-wider">切换</span>
-                </motion.button>
+                </motion.div>
               </>
             )}
           </AnimatePresence>
         </div>
-        <button type="button" onClick={() => setIsStealthMode(!isStealthMode)} className="flex flex-col items-center space-y-2 transition-all duration-500 pointer-events-auto active:scale-95" style={{ opacity: isStealthMode ? 0.1 : 1 }}>
+        <Button
+          type="button"
+          onClick={() => setIsStealthMode(!isStealthMode)}
+          className="flex flex-col items-center space-y-2 transition-all duration-500 pointer-events-auto active:scale-95"
+          style={{ opacity: isStealthMode ? 0.1 : 1 }}
+        >
           <div className="w-14 h-14 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 text-white shadow-lg">{isStealthMode ? <Eye size={22} /> : <EyeOff size={22} />}</div>
           <span className="text-[10px] text-white/80 font-bold tracking-wider">{isStealthMode ? "显示" : "隐藏"}</span>
-        </button>
+        </Button>
       </div>
 
       <AnimatePresence>
@@ -1131,9 +1147,12 @@ const FullScanner = () => {
             className="fixed inset-0 bg-white z-[200] flex flex-col font-sans pt-[var(--sat)] pb-[var(--sab)]"
           >
             <div className="bg-white h-[44px] flex items-center px-1 shrink-0">
-              <button onClick={() => navigate(-1)} className="p-2">
-                <ChevronLeft size={33} className="text-[#333]" strokeWidth={1.3} />
-              </button>
+              <IconButton
+                icon={<ChevronLeft size={33} className="text-[#333]" strokeWidth={1.3} />}
+                label="返回"
+                onClick={() => navigate(-1)}
+                className="p-2 text-[#333]"
+              />
               <div className="flex-1 text-center text-[21px] text-[#333] pr-10">
                 签到
               </div>
@@ -1166,13 +1185,20 @@ const FullScanner = () => {
               <h3 className="text-lg font-black mb-4 text-slate-900">选择摄像头</h3>
               <div className="space-y-2 max-h-[40vh] overflow-y-auto custom-scrollbar">
                 {cameras.map(camera => (
-                  <button key={camera.id} type="button" onClick={() => { setSelectedDeviceId(camera.id); setShowCameraList(false); }} className={`w-full p-4 rounded-xl text-left font-bold transition-all flex items-center justify-between ${selectedDeviceId === camera.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+                  <Button
+                    key={camera.id}
+                    type="button"
+                    onClick={() => { setSelectedDeviceId(camera.id); setShowCameraList(false); }}
+                    className={`w-full p-4 rounded-xl text-left font-bold transition-all flex items-center justify-between ${selectedDeviceId === camera.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                  >
                     <span className="truncate">{camera.label || `摄像头 ${camera.id.substring(0, 5)}`}</span>
                     {selectedDeviceId === camera.id && <div className="w-2 h-2 bg-white rounded-full" />}
-                  </button>
+                  </Button>
                 ))}
               </div>
-              <button type="button" onClick={() => setShowCameraList(false)} className="w-full mt-4 py-3 text-slate-400 font-bold">取消</button>
+              <Button type="button" onClick={() => setShowCameraList(false)} className="w-full mt-4 py-3 text-slate-400 font-bold bg-slate-100 hover:bg-slate-200">
+                取消
+              </Button>
             </motion.div>
           </motion.div>
         )}

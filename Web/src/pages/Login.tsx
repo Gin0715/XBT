@@ -5,6 +5,9 @@ import { Phone, Lock, Eye, EyeOff, Loader2, ChevronLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import client from '../api/client';
 import { useAuthStore } from '../store/auth';
+import { Button } from '../components/ui/Button';
+import { IconButton } from '../components/ui/IconButton';
+import { GlassCard } from '../components/ui/GlassCard';
 import type { ApiResponse, AuthResponse } from '../types';
 
 const Login = () => {
@@ -43,20 +46,20 @@ const Login = () => {
   return (
     <div className="flex-1 flex flex-col p-8 justify-center relative bg-transparent">
       {accounts.length > 0 && (
-        <button
+        <IconButton
+          icon={<ChevronLeft size={24} />}
+          label="返回"
           onClick={() => navigate(-1)}
-          className="absolute top-[calc(var(--spacing)*4.5+var(--sat))] left-2 p-2 rounded-xl transition-all duration-200 hover:bg-white/50"
-          style={{ color: '#64748B' }}
-        >
-          <ChevronLeft size={24} />
-        </button>
+          className="absolute top-[calc(var(--spacing)*4.5+var(--sat))] left-2 text-slate-600"
+        />
       )}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full"
-      >
+      <GlassCard className="w-full p-8 flex-1 flex flex-col justify-center relative bg-transparent">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="w-full"
+        >
         {/* Logo */}
         <div className="mb-10 text-center">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-4 overflow-hidden shadow-xl"
@@ -79,9 +82,9 @@ const Login = () => {
         <form onSubmit={handleLogin} className="space-y-5">
           {/* Mobile */}
           <div className="space-y-1.5">
-            <label className="text-sm font-semibold ml-1" style={{ color: '#334155' }}>手机号</label>
+            <label className="text-sm font-semibold ml-1 text-slate-800">手机号</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none" style={{ color: '#94A3B8' }}>
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Phone size={18} />
               </div>
               <input
@@ -89,11 +92,7 @@ const Login = () => {
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
                 placeholder="学习通绑定手机号"
-                className="block w-full pl-10 pr-4 py-3.5 rounded-xl transition-all duration-200 font-medium placeholder:text-slate-300 focus:outline-none"
-                style={{
-                  background: 'rgba(248,250,252,0.8)',
-                  border: '1px solid rgba(226,232,240,0.8)',
-                }}
+                className="form-input block w-full pl-10 pr-4 font-medium placeholder:text-slate-300 focus:outline-none"
                 autoComplete="username"
               />
             </div>
@@ -101,9 +100,9 @@ const Login = () => {
 
           {/* Password */}
           <div className="space-y-1.5">
-            <label className="text-sm font-semibold ml-1" style={{ color: '#334155' }}>密码</label>
+            <label className="text-sm font-semibold ml-1 text-slate-800">密码</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none" style={{ color: '#94A3B8' }}>
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Lock size={18} />
               </div>
               <input
@@ -111,42 +110,32 @@ const Login = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="学习通密码"
-                className="block w-full pl-10 pr-12 py-3.5 rounded-xl transition-all duration-200 font-medium placeholder:text-slate-300 focus:outline-none"
-                style={{
-                  background: 'rgba(248,250,252,0.8)',
-                  border: '1px solid rgba(226,232,240,0.8)',
-                }}
+                className="form-input block w-full pl-10 pr-12 font-medium placeholder:text-slate-300 focus:outline-none"
                 autoComplete="current-password"
               />
-              <button
+              <IconButton
                 type="button"
+                icon={showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                label={showPassword ? '隐藏密码' : '显示密码'}
+                className="absolute inset-y-0 right-0 pr-3.5 text-slate-400"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3.5 flex items-center transition-colors duration-200"
-                style={{ color: '#94A3B8' }}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+              />
             </div>
           </div>
 
           {/* Submit */}
-          <button
-            
-            
+          <Button
             type="submit"
             disabled={isLoading}
-            className="w-full flex items-center justify-center py-4 px-4 text-white font-semibold rounded-xl shadow-lg transition-all duration-200 disabled:opacity-50 disabled:scale-100"
-            style={{
-              background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
-              boxShadow: '0 4px 20px rgba(22,93,255,0.35)',
-            }}
+            className="w-full"
+            size="lg"
           >
             {isLoading ? (
               <Loader2 className="animate-spin mr-2" size={20} />
             ) : (
               '登录 / 注册'
             )}
-          </button>
+          </Button>
         </form>
 
         <div className="mt-12 text-center" style={{ color: '#94A3B8', fontSize: '11px', lineHeight: '1.6' }}>
@@ -154,6 +143,7 @@ const Login = () => {
             姓名，手机号，密码，课程信息等。您的密码将仅用于登录第三方网站。</p>
         </div>
       </motion.div>
+      </GlassCard>
     </div>
   );
 };

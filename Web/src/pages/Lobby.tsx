@@ -34,6 +34,8 @@ import PullToRefresh from '../components/PullToRefresh';
 import { useLocationPanel, type LocationFormData } from '../hooks/useLocationPanel';
 import { LocationForm } from '../components/location/LocationForm';
 import BMapKeyConfig from '../components/location/BMapKeyConfig';
+import { Button } from '../components/ui/Button';
+import { IconButton } from '../components/ui/IconButton';
 
 type PendingActivityEntry = {
   activity: CourseActivities['activities'][number];
@@ -213,12 +215,10 @@ const Lobby = () => {
   return (
     <div className="flex-1 flex flex-col bg-transparent relative overflow-hidden">
       {/* ===== Header — glass effect ===== */}
-      <div className="glass sticky top-0 z-10 border-b px-4 flex items-center shrink-0"
+      <div className="page-header-sticky glass-panel px-4 flex items-center shrink-0"
         style={{
           height: 'calc(80px + var(--sat))',
           paddingTop: 'var(--sat)',
-          borderColor: 'rgba(226,232,240,0.4)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
         }}
       >
         <div className="flex items-center justify-between w-full">
@@ -248,49 +248,35 @@ const Lobby = () => {
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-0.5 sm:gap-0.5 -mr-1 sm:mr-0">
-            <button
+          <div className="flex items-center gap-2 -mr-1 sm:mr-0">
+            <IconButton
+              icon={<MapPin size={20} />}
+              label="地址库"
+              className="text-emerald-600"
               onClick={() => { setIsLocationPanelOpen(true); fetchLocations(); }}
-              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-100/50"
-              style={{ color: '#00B42A' }}
-              title="地址库"
-            >
-              <MapPin size={20} />
-            </button>
-
-            <button
+            />
+            <IconButton
+              icon={<Zap size={20} />}
+              label="抢答功能"
+              className="text-orange-500"
               onClick={() => navigate('/quiz')}
-              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-slate-100/50"
-              style={{ color: '#FF7D00' }}
-              title="抢答功能"
-            >
-              <Zap size={20} />
-            </button>
-
-            <button
+            />
+            <IconButton
+              icon={<Settings size={20} />}
+              label="课程配置"
               onClick={() => navigate('/courses')}
-              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary hover:bg-slate-100/50"
-              title="课程配置"
-            >
-              <Settings size={20} />
-            </button>
-
-            <button
+            />
+            <IconButton
+              icon={<RefreshIndicator spinning={isLoading} />}
+              label="刷新活动"
               onClick={fetchActivities}
-              className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary hover:bg-slate-100/50"
-              title="刷新活动"
-            >
-              <RefreshIndicator spinning={isLoading} />
-            </button>
-
+            />
             {user && user.permission >= 2 && (
-              <button
+              <IconButton
+                icon={<ShieldCheck size={20} />}
+                label="白名单管理"
                 onClick={() => navigate('/admin/whitelist')}
-                className="btn-tap-sm p-2.5 rounded-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-secondary hover:bg-slate-100/50"
-                title="白名单管理"
-              >
-                <ShieldCheck size={20} />
-              </button>
+              />
             )}
           </div>
         </div>
@@ -319,13 +305,7 @@ const Lobby = () => {
               ))}
             </div>
           ) : !isLoading && activities.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 rounded-3xl border border-dashed shadow-sm anim-fade-in"
-              style={{
-                borderColor: 'rgba(226,232,240,0.6)',
-                background: 'rgba(255,255,255,0.7)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-              }}
+            <div className="flex flex-col items-center justify-center py-20 rounded-3xl border-dashed shadow-sm anim-fade-in glass-sheet border-muted"
             >
               <div className="relative mb-6">
                 <div className="absolute inset-0 rounded-2xl bg-slate-100 blur-xl opacity-30" />
@@ -337,19 +317,15 @@ const Lobby = () => {
                   <Clock size={40} className="text-slate-300" />
                 </div>
               </div>
-              <p className="font-semibold text-sm" style={{ color: '#94A3B8' }}>暂无正在进行的签到</p>
-              <p className="text-xs mt-1.5" style={{ color: '#c0c8d4' }}>下拉刷新或点击右上角刷新按钮获取最新活动</p>
+              <p className="font-semibold text-sm text-text-secondary">暂无正在进行的签到</p>
+              <p className="text-xs mt-1.5 text-text-muted">下拉刷新或点击右上角刷新按钮获取最新活动</p>
               {/* Quick action button */}
-              <button
+              <Button
                 onClick={() => navigate('/courses')}
-                className="btn-tap mt-6 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-lg transition-all duration-200"
-                style={{
-                  background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
-                  boxShadow: '0 4px 16px rgba(22,93,255,0.3)',
-                }}
+                className="mt-6 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-200/30"
               >
                 添加课程
-              </button>
+              </Button>
             </div>
           ) : (
             <LayoutGroup>

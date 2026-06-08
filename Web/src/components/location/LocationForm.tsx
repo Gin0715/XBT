@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit3, Save, Crosshair, MapPin, Search, CheckCircle2 } from 'lucide-react';
+import { Plus, Edit3, Save, Crosshair, MapPin, CheckCircle2 } from 'lucide-react';
 import { sanitizeCoord } from '../../utils/coords';
 import BMapPicker from './BMapPicker';
-import AddressSearch from './AddressSearch';
 
 export interface LocationFormData {
   name: string;
@@ -40,8 +39,7 @@ export const LocationForm: React.FC<LocationFormProps> = ({
 }) => {
   const isAdd = mode === 'add';
   const [showMapPicker, setShowMapPicker] = useState(false);
-  const [showAddressSearch, setShowAddressSearch] = useState(false);
-  const [fillFeedback, setFillFeedback] = useState<'search' | 'map' | 'gps' | null>(null);
+  const [fillFeedback, setFillFeedback] = useState<'map' | 'gps' | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
   // 坐标填充成功后的视觉反馈（1.5s 后自动消失）
@@ -52,20 +50,6 @@ export const LocationForm: React.FC<LocationFormProps> = ({
     }
     return () => { if (feedbackTimer.current) clearTimeout(feedbackTimer.current); };
   }, [fillFeedback]);
-
-  const handleSearchConfirm = (lat: number, lng: number, address: string, name: string) => {
-    const newForm: LocationFormData = {
-      ...form,
-      lat: lat.toFixed(6),
-      lng: lng.toFixed(6),
-    };
-    if (isAdd) {
-      if (!form.name && name) newForm.name = name;
-      if (!form.description && address) newForm.description = address;
-    }
-    onChange(newForm);
-    setFillFeedback('search');
-  };
 
   const handleMapPick = (lat: number, lng: number, address: string) => {
     const newForm: LocationFormData = {
@@ -184,31 +168,6 @@ export const LocationForm: React.FC<LocationFormProps> = ({
             </div>
 
             <div className="flex gap-1.5 sm:gap-2 min-w-0">
-              {/* 名称搜索 */}
-              <button
-                onClick={() => setShowAddressSearch(true)}
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-2.5 text-[10px] sm:text-xs font-bold rounded-xl transition-all duration-200 btn-tap-sm relative overflow-hidden ${
-                  fillFeedback === 'search' ? 'ring-2' : ''
-                }`}
-                style={{
-                  color: '#8b5cf6',
-                  background: fillFeedback === 'search' ? 'rgba(139,92,246,0.18)' : 'rgba(139,92,246,0.08)',
-                  borderColor: fillFeedback === 'search' ? 'rgba(139,92,246,0.5)' : 'rgba(139,92,246,0.2)',
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                }}
-                title="输入关键词搜索百度地图POI，自动填入坐标和地址"
-              >
-                {fillFeedback === 'search' ? (
-                  <CheckCircle2 size={13} className="shrink-0" />
-                ) : (
-                  <Search size={13} className="shrink-0" />
-                )}
-                <span className="truncate">
-                  {fillFeedback === 'search' ? '已填入' : '名称搜索'}
-                </span>
-              </button>
-
               {/* 地图选点 */}
               <button
                 onClick={() => setShowMapPicker(true)}
@@ -265,7 +224,7 @@ export const LocationForm: React.FC<LocationFormProps> = ({
 
             {/* 辅助提示 */}
             <p className="text-[9px] text-text-muted/50 text-center leading-relaxed">
-              搜索地名自动填全部 · 地图点击选精确坐标 · GPS填当前位置
+              地图点击选精确坐标 · GPS填当前位置
             </p>
           </div>
         )}
@@ -311,13 +270,6 @@ export const LocationForm: React.FC<LocationFormProps> = ({
         onConfirm={handleMapPick}
         initialLat={form.lat ? parseFloat(form.lat) : undefined}
         initialLng={form.lng ? parseFloat(form.lng) : undefined}
-      />
-
-      {/* 地址搜索 */}
-      <AddressSearch
-        open={showAddressSearch}
-        onClose={() => setShowAddressSearch(false)}
-        onConfirm={handleSearchConfirm}
       />
     </motion.div>
   );

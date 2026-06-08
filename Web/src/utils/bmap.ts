@@ -12,8 +12,6 @@
  * 百度地图坐标拾取工具：https://lbs.baidu.com/maptool/getpoint
  */
 
-import { useAuthStore } from '../store/auth';
-
 // ---- localStorage key ----
 const STORAGE_KEY = 'baidu_map_key';
 
@@ -316,65 +314,8 @@ export async function searchNearbyPOI(
   return [];
 }
 
-// ---- 地点搜索结果类型 ----
-
-export interface BMapPlaceResult {
-  name: string;           // 地点名称
-  address: string;        // 详细地址
-  lat: number;            // 纬度 (BD-09)
-  lng: number;            // 经度 (BD-09)
-  city: string;           // 所在城市
-  district: string;       // 所在区县
-  business: string;       // 商圈
-  phone: string;          // 电话
-}
-
 /**
- * 搜索地点（百度地图 LocalSearch）
- * 输入关键词，返回匹配的地点列表，支持按城市限定
- */
-export async function searchPlaces(keyword: string, city?: string): Promise<BMapPlaceResult[]> {
-  if (!keyword.trim()) {
-    return [];
-  }
-
-  const query = new URLSearchParams({ keyword: keyword.trim() });
-  if (city) {
-    query.set('city', city);
-  }
-
-  const token = useAuthStore.getState().token;
-  const headers: Record<string, string> = { 'Accept': 'application/json' };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`/api/bmap/search?${query.toString()}`, {
-    method: 'GET',
-    headers,
-  });
-
-  if (!response.ok) {
-    console.warn('[BMap] 后端代理搜索失败', await response.text());
-    return [];
-  }
-
-  const data = await response.json();
-  const results = Array.isArray(data.results) ? data.results : [];
-
-  return results.map((item: any) => ({
-    name: item.name || '',
-    address: item.address || item.address_detail?.address || '',
-    lat: item.location?.lat || 0,
-    lng: item.location?.lng || 0,
-    city: item.city || item.address_detail?.city || '',
-    district: item.area || item.address_detail?.district || '',
-    business: item.business || '',
-    phone: item.telephone || '',
-  }));
-}
-
-/**
+ * 正向地理编码：地址 → 坐标（百度地图 Geocoder）
  * 正向地理编码：地址 → 坐标（百度地图 Geocoder）
  * 将文本地址转换为经纬度坐标 + 结构化地址
  */

@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import client from '../api/client';
 import type { ApiResponse, Course } from '../types';
 import PullToRefresh from '../components/PullToRefresh';
+import { Button } from '../components/ui/Button';
+import { GlassPanel } from '../components/ui/GlassPanel';
 
 const Courses = () => {
   const navigate = useNavigate();
@@ -103,29 +105,30 @@ const Courses = () => {
   return (
     <div className="h-full flex flex-col bg-transparent relative overflow-hidden">
       {/* Header */}
-      <div className="glass sticky top-0 z-30 border-b px-4 flex items-center justify-between shrink-0"
+      <GlassPanel className="page-header-sticky flex items-center justify-between shrink-0 px-4"
         style={{
           height: 'calc(80px + var(--sat))',
           paddingTop: 'var(--sat)',
-          borderColor: 'rgba(226,232,240,0.4)',
         }}>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleBack}
-          className="p-2 -ml-2 rounded-xl transition-all duration-200 hover:bg-slate-50"
-          style={{ color: '#64748B' }}
+          className="p-2 -ml-2 text-slate-600"
         >
           <ChevronLeft size={24} />
-        </button>
+        </Button>
         <h2 className="font-bold text-text-primary text-lg">我的课程</h2>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleSync}
           disabled={isSyncing}
-          className="p-2 -mr-2 rounded-xl transition-all duration-200 disabled:opacity-50"
-          style={{ color: '#165DFF' }}
+          className="p-2 -mr-2 text-[#165DFF]"
         >
           <RefreshCw size={20} className={isSyncing ? 'animate-smooth-spin' : ''} />
-        </button>
-      </div>
+        </Button>
+      </GlassPanel>
 
       <PullToRefresh
         onRefresh={fetchCourses}
@@ -148,7 +151,7 @@ const Courses = () => {
               <div
                 key={course.class_id}
                 onClick={() => toggleSelection(course.class_id)}
-                className={`btn-tap-sm p-4 rounded-2xl border cursor-pointer flex items-center space-x-4 transition-all duration-200 ${
+                className={`btn-tap-sm p-4 rounded-[28px] border cursor-pointer flex items-center space-x-4 transition-all duration-200 ${
                   course.is_selected
                     ? 'shadow-md'
                     : 'shadow-sm hover:border-slate-200'
@@ -210,17 +213,14 @@ const Courses = () => {
           borderTop: '1px solid rgba(226,232,240,0.4)',
         }}
       >
-        <button
+        <Button
           onClick={handleSave}
           disabled={isSaving || isLoading}
-          className="btn-tap w-full py-4 text-white font-bold rounded-xl shadow-lg transition-all duration-200 disabled:opacity-60 flex items-center justify-center"
-          style={{
-            background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
-            boxShadow: '0 4px 20px rgba(22,93,255,0.35)',
-          }}
+          className="w-full"
+          size="lg"
         >
           {isSaving ? <Loader2 className="animate-spin mr-2" /> : '保存设置'}
-        </button>
+        </Button>
       </div>
 
       {/* Exit Confirmation Modal */}
@@ -243,26 +243,20 @@ const Courses = () => {
               <h3 className="text-lg font-extrabold text-text-primary mb-2">未保存的更改</h3>
               <p className="text-text-secondary text-sm mb-6">您有未保存的课程选择，确定要离开吗？</p>
               <div className="grid grid-cols-2 gap-3">
-                <button
+                <Button
+                  variant="secondary"
                   onClick={() => setShowExitConfirm(false)}
-                  className="py-3 font-semibold rounded-xl transition-colors"
-                  style={{
-                    color: '#64748B',
-                    background: 'rgba(241,245,249,0.8)',
-                  }}
+                  className="py-3 font-semibold rounded-xl"
                 >
                   取消
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
                   onClick={() => navigate(-1)}
-                  className="py-3 text-white font-semibold rounded-xl shadow-lg transition-all duration-200"
-                  style={{
-                    background: 'linear-gradient(135deg, #F53F3F, #F87171)',
-                    boxShadow: '0 4px 16px rgba(245,63,63,0.25)',
-                  }}
+                  className="py-3 font-semibold rounded-xl"
                 >
                   确定离开
-                </button>
+                </Button>
               </div>
             </motion.div>
           </div>

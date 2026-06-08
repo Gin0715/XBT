@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, Camera, EyeOff, Eye, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { Button } from '../components/ui/Button';
+import { IconButton } from '../components/ui/IconButton';
 
 type NativeCameraBridge = {
   isReady?: () => boolean;
@@ -547,30 +549,20 @@ const FullPhoto = () => {
         style={{
           background: 'linear-gradient(180deg, rgba(0,0,0,0.5) 0%, transparent 100%)',
         }}>
-        <button onClick={() => navigate(-1)} className="w-10 h-10 rounded-xl flex items-center justify-center backdrop-blur-md active:scale-90 transition-transform"
-          style={{
-            background: 'rgba(255,255,255,0.15)',
-            border: '1px solid rgba(255,255,255,0.1)',
-          }}>
-          <ChevronLeft size={22} className="text-white" />
-        </button>
+        <IconButton
+          icon={<ChevronLeft size={22} className="text-white" />}
+          label="返回"
+          className="w-10 h-10 bg-white/15 border border-white/10 text-white backdrop-blur-md"
+          onClick={() => navigate(-1)}
+        />
         <h2 className="text-[16px] font-bold tracking-wider text-white/90 drop-shadow-sm">拍照签到</h2>
-        <button
+        <Button
           onClick={handleFinish}
-          className="px-4 py-2 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-transform backdrop-blur-md"
-          style={{
-            background: capturedFiles.length > 0
-              ? 'linear-gradient(135deg, #667eea, #764ba2)'
-              : 'rgba(255,255,255,0.15)',
-            color: '#fff',
-            border: '1px solid rgba(255,255,255,0.15)',
-            boxShadow: capturedFiles.length > 0
-              ? '0 4px 16px rgba(102,126,234,0.4)'
-              : 'none',
-          }}
+          disabled={capturedFiles.length === 0}
+          className="px-4 py-2 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-transform bg-gradient-to-r from-violet-500 to-indigo-500 text-white border border-white/15"
         >
           完成 {capturedFiles.length > 0 && `(${capturedFiles.length})`}
-        </button>
+        </Button>
       </div>
 
       <div className="absolute bottom-[calc(48px+var(--sab))] left-0 right-0 z-20 flex flex-col items-center gap-5 px-6">
@@ -609,17 +601,12 @@ const FullPhoto = () => {
                     {index + 1}
                   </div>
                   {/* 删除按钮 */}
-                  <button
+                  <IconButton
+                    icon={<X size={10} className="text-white" />}
+                    label="删除照片"
                     onClick={() => removePhoto(index)}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 active:scale-90 shadow-md"
-                    style={{
-                      background: 'rgba(239,68,68,0.9)',
-                      backdropFilter: 'blur(8px)',
-                      WebkitBackdropFilter: 'blur(8px)',
-                    }}
-                  >
-                    <X size={10} className="text-white" />
-                  </button>
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 active:scale-90 shadow-md bg-red-500/90"
+                  />
                 </motion.div>
               ))}
             </div>
@@ -627,29 +614,20 @@ const FullPhoto = () => {
         )}
 
         <div className="flex items-center gap-6">
-          <button
+          <IconButton
+            icon={<Camera size={20} />}
+            label="选择摄像头"
             onClick={() => setShowCameraList(true)}
-            className="btn-tap w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md transition-all"
-            style={{
-              background: 'rgba(255,255,255,0.12)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              color: '#fff',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-            }}>
-            <Camera size={20} />
-          </button>
-          <button
+            className="w-14 h-14 rounded-full shadow-lg backdrop-blur-md bg-white/15 border border-white/15 text-white"
+          />
+          <Button
             onClick={handleCapture}
             disabled={isCapturing}
-            className="btn-tap w-[72px] h-[72px] rounded-full flex items-center justify-center shadow-2xl transition-transform disabled:opacity-50"
-            style={{
-              background: 'linear-gradient(135deg, #fff, #f1f5f9)',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-            }}
+            className="btn-tap w-[72px] h-[72px] rounded-full shadow-2xl transition-transform disabled:opacity-50 bg-gradient-to-br from-slate-100 to-slate-200"
           >
-            <div className="w-[56px] h-[56px] rounded-full flex items-center justify-center"
+            <div className="w-[56px] h-[56px] rounded-full flex items-center justify-center border-3 border-slate-900 shadow-inner"
               style={{
-                border: '3px solid #1e293b',
+                borderWidth: '3px',
                 boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)',
               }}>
               {isCapturing ? (
@@ -658,20 +636,13 @@ const FullPhoto = () => {
                 <div className="w-[44px] h-[44px] rounded-full" style={{ background: '#1e293b' }} />
               )}
             </div>
-          </button>
-          <button
+          </Button>
+          <IconButton
+            icon={isStealthMode ? <EyeOff size={20} /> : <Eye size={20} />}
+            label={isStealthMode ? '隐身模式已开' : '隐身模式'}
             onClick={() => setIsStealthMode(!isStealthMode)}
-            className="btn-tap w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md transition-all"
-            style={{
-              background: isStealthMode
-                ? 'rgba(239,68,68,0.2)'
-                : 'rgba(255,255,255,0.12)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              color: isStealthMode ? '#ef4444' : '#fff',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-            }}>
-            {isStealthMode ? <EyeOff size={20} /> : <Eye size={20} />}
-          </button>
+            className={`w-14 h-14 rounded-full shadow-lg backdrop-blur-md border border-white/15 ${isStealthMode ? 'bg-red-200/20 text-red-500' : 'bg-white/15 text-white'}`}
+          />
         </div>
       </div>
 
@@ -682,13 +653,20 @@ const FullPhoto = () => {
               <h3 className="text-lg font-black mb-4 text-slate-900">选择摄像头</h3>
               <div className="space-y-2 max-h-[40vh] overflow-y-auto custom-scrollbar">
                 {cameras.map(camera => (
-                  <button key={camera.id} type="button" onClick={() => { setSelectedDeviceId(camera.id); setShowCameraList(false); }} className={`w-full p-4 rounded-xl text-left font-bold transition-all flex items-center justify-between ${selectedDeviceId === camera.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+                  <Button
+                    key={camera.id}
+                    type="button"
+                    onClick={() => { setSelectedDeviceId(camera.id); setShowCameraList(false); }}
+                    className={`w-full p-4 rounded-xl text-left font-bold transition-all flex items-center justify-between ${selectedDeviceId === camera.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                  >
                     <span className="truncate">{camera.label}</span>
                     {selectedDeviceId === camera.id && <div className="w-2 h-2 bg-white rounded-full" />}
-                  </button>
+                  </Button>
                 ))}
               </div>
-              <button type="button" onClick={() => setShowCameraList(false)} className="w-full mt-4 py-3 text-slate-400 font-bold">取消</button>
+              <Button type="button" onClick={() => setShowCameraList(false)} className="w-full mt-4 py-3 text-slate-400 font-bold bg-slate-100 hover:bg-slate-200">
+                取消
+              </Button>
             </motion.div>
           </motion.div>
         )}

@@ -36,6 +36,9 @@ import { QrInput } from '../components/sign/QrInput';
 import { NormalInput } from '../components/sign/NormalInput';
 import { PhotoInput } from '../components/sign/PhotoInput';
 import { ProgressCard } from '../components/sign/ProgressCard';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+import { GlassPanel } from '../components/ui/GlassPanel';
 
 const MAX_PHOTO_UPLOAD_BYTES = 20 * 1024 * 1024;
 
@@ -499,25 +502,22 @@ const SignDetail = () => {
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-transparent">
       {/* AppBar — glass */}
-      <div className="glass sticky top-0 z-10 border-b px-4 flex items-center shrink-0 overflow-hidden"
+      <GlassPanel className="page-header-sticky px-4 flex items-center shrink-0 overflow-hidden"
         style={{
           height: 'calc(80px + var(--sat))',
           paddingTop: 'var(--sat)',
-          borderColor: 'rgba(226,232,240,0.4)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
         }}>
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl transition-colors relative z-10 hover:bg-slate-50"
-          style={{ color: '#64748B' }}>
+        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl transition-colors relative z-10 hover:bg-slate-50 text-text-secondary">
           <ChevronLeft size={24} />
         </button>
         <div className="ml-2 flex-1 min-w-0 relative z-10">
           <h2 className="font-bold text-text-primary truncate">{getSignTypeName()}</h2>
           <p className="text-[10px] font-medium text-text-muted truncate tracking-wide">{activity.course_name}</p>
         </div>
-        <div className="absolute -right-8 -bottom-4 opacity-10 pointer-events-none transform rotate-12" style={{ color: '#165DFF' }}>
+        <div className="absolute -right-8 -bottom-4 opacity-10 pointer-events-none transform rotate-12 text-brand-500">
           {getSignIcon(120)}
         </div>
-      </div>
+      </GlassPanel>
 
       <div className="flex-1 min-h-0 overflow-y-auto touch-pan-y px-6 py-4 space-y-5 custom-scrollbar pb-safe-6">
         {/* Activity Briefing */}
@@ -539,19 +539,9 @@ const SignDetail = () => {
             </div>
           </div>
           <div className="text-right shrink-0 ml-4">
-            <div className={`text-sm font-extrabold px-3 py-1 rounded-xl inline-block shadow-sm ${
-              isEnded
-                ? 'bg-slate-100 text-slate-400 border border-slate-200'
-                : 'text-brand-600 border shadow-md'
-            }`}
-              style={!isEnded ? {
-                background: 'linear-gradient(135deg, rgba(239,244,255,0.9), rgba(238,242,255,0.9))',
-                borderColor: 'rgba(22,93,255,0.25)',
-                boxShadow: '0 2px 8px rgba(22,93,255,0.1)',
-              } : {}}
-            >
+            <Badge variant={isEnded ? 'default' : 'info'} className="text-sm font-extrabold px-3 py-1 rounded-xl inline-flex shadow-sm">
               {isEnded ? '已结束' : '进行中'}
-            </div>
+            </Badge>
             <p className="text-[10px] text-text-muted font-mono font-bold tracking-tighter mt-0.5">
               {formatSmartTime(activity.end_time)} 截止
             </p>
@@ -590,26 +580,22 @@ const SignDetail = () => {
           )}
 
           <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
-            <button
+            <Button
               onClick={activity.sign_type === 2
                 ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } })
                 : handleExecute
               }
               disabled={isExecuting}
-              className="w-full py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all duration-200 active:scale-[0.97] flex items-center justify-center gap-3 text-white disabled:opacity-50"
-              style={{
-                background: isExecuting ? '#94a3b8' : 'linear-gradient(135deg, #165DFF, #4f39d0)',
-                boxShadow: isExecuting ? 'none' : '0 4px 16px rgba(22,93,255,0.3)',
-              }}
+              className="w-full py-3.5 flex items-center justify-center gap-3"
             >
               {isExecuting ? (
                 <Loader2 className="animate-spin" size={18} />
               ) : activity.sign_type === 2 ? (
                 <><QrCode size={18} /> 去扫码签到</>
               ) : (
-                <>{selectedUids.length > 0 ? `立即签到 (${selectedUids.length + 1})` : "立即签到"}</>
+                <>{selectedUids.length > 0 ? `立即签到 (${selectedUids.length + 1})` : '立即签到'}</>
               )}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -619,10 +605,9 @@ const SignDetail = () => {
             <div className="flex items-center gap-2">
               <Users size={16} className="text-text-primary" />
               <h3 className="font-bold text-sm text-text-primary">代他人签到</h3>
-              <span className="text-[10px] px-2 py-0.5 rounded font-bold"
-                style={{ background: 'rgba(226,232,240,0.6)', color: '#64748B' }}>
-                {selectedUids.length}/{classmates.length}
-              </span>
+                <Badge className="text-[10px] px-2 py-0.5 font-bold">
+                  {selectedUids.length}/{classmates.length}
+                </Badge>
             </div>
             <button onClick={selectAll} className="text-[11px] font-bold text-brand-600 transition-colors">
               {selectedUids.length === classmates.length ? '取消全选' : '全选'}
@@ -660,11 +645,13 @@ const SignDetail = () => {
                       <div className="flex items-center gap-2 mb-0.5 min-w-0">
                         <p className="font-bold text-base text-text-primary leading-tight truncate">{student.name}</p>
                         {classmateSignStates[student.uid]?.signed && (
-                          <span className="max-w-[140px] truncate text-[10px] px-1.5 py-0.5 rounded-md font-semibold shrink-0"
-                            style={{ background: 'rgba(0,180,42,0.1)', color: '#15803d' }}
-                            title={getSignStateLabel(student.uid, classmateSignStates[student.uid].record_source, classmateSignStates[student.uid].record_source_name)}>
+                          <Badge
+                            variant="success"
+                            className="max-w-[140px] truncate text-[10px] px-1.5 py-0.5 font-semibold shrink-0"
+                            title={getSignStateLabel(student.uid, classmateSignStates[student.uid].record_source, classmateSignStates[student.uid].record_source_name)}
+                          >
                             {getSignStateLabel(student.uid, classmateSignStates[student.uid].record_source, classmateSignStates[student.uid].record_source_name)}
-                          </span>
+                          </Badge>
                         )}
                       </div>
                       <p className="text-xs text-text-muted font-mono font-bold tracking-tighter">{student.mobile_masked}</p>

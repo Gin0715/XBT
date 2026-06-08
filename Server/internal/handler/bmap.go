@@ -52,9 +52,27 @@ func (h *BMapHandler) Search(c *gin.Context) {
 		return
 	}
 
-	cacheKey := fmt.Sprintf("%s%s", bmapSearchCachePrefix, keyword)
+	// 优先使用前端传入的 AK（用户在前端 UI 配置的 Key），否则使用服务端配置
+	ak := strings.TrimSpace(c.Query("ak"))
+	if ak == "" {
+		ak = h.apiKey
+	}
 
-	payload, err := h.fetchCachedOrRemote(c.Request.Context(), cacheKey, keyword)
+	// 前端传入自定义 AK 时不做 Redis 缓存（避免 Key 泄漏、不同 Key 结果串混）
+	if ak != h.apiKey {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+		payload, err := h.requestBMapSearch(ctx, keyword, ak)
+		if err != nil {
+			common.Fail(c, 500, fmt.Sprintf("百度地图搜索失败: %v", err))
+			return
+		}
+		c.Data(200, "application/json; charset=utf-8", payload)
+		return
+	}
+
+	cacheKey := fmt.Sprintf("%s%s", bmapSearchCachePrefix, keyword)
+	payload, err := h.fetchCachedOrRemote(c.Request.Context(), cacheKey, keyword, ak)
 	if err != nil {
 		common.Fail(c, 500, fmt.Sprintf("百度地图搜索失败: %v", err))
 		return
@@ -63,7 +81,7 @@ func (h *BMapHandler) Search(c *gin.Context) {
 	c.Data(200, "application/json; charset=utf-8", payload)
 }
 
-func (h *BMapHandler) fetchCachedOrRemote(ctx context.Context, cacheKey, keyword string) ([]byte, error) {
+func (h *BMapHandler) fetchCachedOrRemote(ctx context.Context, cacheKey, keyword, ak string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -80,7 +98,7 @@ func (h *BMapHandler) fetchCachedOrRemote(ctx context.Context, cacheKey, keyword
 			return nil, err
 		}
 
-		payload, err := h.requestBMapSearch(ctx, keyword)
+		payload, err := h.requestBMapSearch(ctx, keyword, ak)
 		if err != nil {
 			return nil, err
 		}
@@ -123,9 +141,13 @@ func (h *BMapHandler) waitRateLimit(ctx context.Context) error {
 	return nil
 }
 
-func (h *BMapHandler) requestBMapSearch(ctx context.Context, keyword string) ([]byte, error) {
-	if h.apiKey == "" {
-		return nil, fmt.Errorf("服务器未配置百度地图 API Key")
+func (h *BMapHandler) requestBMapSearch(ctx context.Context, keyword, ak string) ([]byte, error) {
+	// 未传入 AK 时回退到服务端配置
+	if ak == "" {
+		ak = h.apiKey
+	}
+	if ak == "" {
+		return nil, fmt.Errorf("未配置百度地图 API Key，请在地址库面板中配置")
 	}
 
 	endpoint, err := url.Parse(bmapSearchAPI)
@@ -139,7 +161,7 @@ func (h *BMapHandler) requestBMapSearch(ctx context.Context, keyword string) ([]
 	q.Set("output", "json")
 	q.Set("scope", "2")
 	q.Set("page_size", "15")
-	q.Set("ak", h.apiKey)
+	q.Set("ak", ak)
 	endpoint.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
@@ -166,5 +188,15 @@ func (h *BMapHandler) requestBMapSearch(ctx context.Context, keyword string) ([]
 		return nil, fmt.Errorf("百度地图返回了无效 JSON")
 	}
 
+	// 检查百度 API 的业务状态码
+	var bmapResp struct {
+		Status  int    `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &bmapResp); err == nil && bmapResp.Status != 0 {
+		return nil, fmt.Errorf("百度地图 API 返回错误 [%d]: %s", bmapResp.Status, bmapResp.Message)
+	}
+
 	return body, nil
+
 }

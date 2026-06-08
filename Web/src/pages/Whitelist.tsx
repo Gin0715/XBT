@@ -14,6 +14,10 @@ import {
 import toast from 'react-hot-toast';
 import client from '../api/client';
 import type { ApiResponse, WhitelistItem } from '../types';
+import { Button } from '../components/ui/Button';
+import { IconButton } from '../components/ui/IconButton';
+import { GlassPanel } from '../components/ui/GlassPanel';
+import { GlassCard } from '../components/ui/GlassCard';
 
 const Whitelist = () => {
   const navigate = useNavigate();
@@ -93,39 +97,35 @@ const Whitelist = () => {
 
   return (
     <div className="h-full flex flex-col bg-transparent relative overflow-hidden">
-      <div className="glass sticky top-0 z-30 border-b px-4 flex items-center justify-between shrink-0"
+      <GlassPanel className="page-header-sticky flex items-center justify-between shrink-0 px-4"
         style={{
           height: 'calc(80px + var(--sat))',
           paddingTop: 'var(--sat)',
-          borderColor: 'rgba(226,232,240,0.4)',
         }}>
         <div className="flex items-center">
-          <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl transition-colors hover:bg-slate-50" style={{ color: '#64748B' }}>
-            <ChevronLeft size={24} />
-          </button>
+          <IconButton
+            icon={<ChevronLeft size={24} />}
+            label="返回"
+            className="text-slate-600"
+            onClick={() => navigate(-1)}
+          />
           <h2 className="ml-2 font-bold text-text-primary text-lg">白名单管理</h2>
         </div>
         <div className="flex space-x-1">
-          <button
-            
-            
+          <IconButton
+            icon={<Upload size={20} />}
+            label="批量导入"
+            className="text-[#165DFF]"
             onClick={() => setShowBatchModal(true)}
-            className="p-2 rounded-xl transition-all duration-200" style={{ color: '#165DFF' }}
-            title="批量导入"
-          >
-            <Upload size={20} />
-          </button>
-          <button
-            
-            
+          />
+          <IconButton
+            icon={<Plus size={24} />}
+            label="添加单个"
+            className="text-[#165DFF]"
             onClick={() => setShowAddModal(true)}
-            className="p-2 rounded-xl transition-all duration-200" style={{ color: '#165DFF' }}
-            title="添加单个"
-          >
-            <Plus size={24} />
-          </button>
+          />
         </div>
-      </div>
+      </GlassPanel>
 
       <div className="flex-1 overflow-y-auto p-4 pb-[calc(40px+var(--sab))] custom-scrollbar">
         <div className="relative mb-6">
@@ -135,11 +135,7 @@ const Whitelist = () => {
             placeholder="搜索手机号..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-3.5 rounded-xl outline-none shadow-sm transition-all duration-200 font-medium placeholder:text-slate-300 focus:outline-none"
-            style={{
-              background: 'rgba(255,255,255,0.85)',
-              border: '1px solid rgba(226,232,240,0.6)',
-            }}
+            className="form-input pl-10"
           />
         </div>
 
@@ -150,9 +146,9 @@ const Whitelist = () => {
         ) : (
           <div className="space-y-2.5">
             {filteredList.map((item) => (
-              <div
+              <GlassCard
                 key={item.id}
-                className="flex items-center justify-between p-4 rounded-2xl border shadow-sm"
+                className="flex items-center justify-between p-4 rounded-[28px] border shadow-sm"
                 style={{
                   background: 'rgba(255,255,255,0.85)',
                   borderColor: 'rgba(226,232,240,0.4)',
@@ -178,15 +174,14 @@ const Whitelist = () => {
                   </div>
                 </div>
                 {item.permission < 2 && (
-                  <button
+                  <IconButton
+                    icon={<Trash2 size={18} />}
+                    label="删除白名单"
+                    className="text-slate-400 hover:text-error-500"
                     onClick={() => handleDelete(item.id, item.mobile_masked)}
-                    className="p-2.5 text-slate-300 hover:text-error-500 transition-colors rounded-xl hover:bg-red-50"
-                    style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  />
                 )}
-              </div>
+              </GlassCard>
             ))}
           </div>
         )}
@@ -205,7 +200,12 @@ const Whitelist = () => {
             }}>
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-extrabold text-text-primary">添加用户</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-text-muted"><X size={20} /></button>
+              <IconButton
+                icon={<X size={20} />}
+                label="关闭"
+                className="text-text-muted"
+                onClick={() => setShowAddModal(false)}
+              />
             </div>
             <div className="space-y-4">
               <div>
@@ -214,26 +214,18 @@ const Whitelist = () => {
                   type="tel"
                   value={newMobile}
                   onChange={(e) => setNewMobile(e.target.value)}
-                  className="w-full p-4 rounded-2xl outline-none font-medium mt-1.5 transition-all duration-200 placeholder:text-slate-300 focus:outline-none"
-                  style={{
-                    background: 'rgba(248,250,252,0.8)',
-                    border: '1px solid rgba(226,232,240,0.8)',
-                  }}
+                  className="form-input mt-1.5"
                   placeholder="13800000000"
                 />
               </div>
-              <button
-                
+              <Button
                 onClick={handleAdd}
                 disabled={isSubmitting}
-                className="w-full py-4 text-white font-bold rounded-2xl shadow-lg transition-all duration-200 disabled:opacity-50"
-                style={{
-                  background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
-                  boxShadow: '0 4px 16px rgba(22,93,255,0.3)',
-                }}
+                className="w-full"
+                size="lg"
               >
                 {isSubmitting ? <Loader2 className="animate-spin mx-auto" /> : '确认添加'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -252,32 +244,29 @@ const Whitelist = () => {
             }}>
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-extrabold text-text-primary">批量导入</h3>
-              <button onClick={() => setShowBatchModal(false)} className="text-text-muted"><X size={20} /></button>
+              <IconButton
+                icon={<X size={20} />}
+                label="关闭"
+                className="text-text-muted"
+                onClick={() => setShowBatchModal(false)}
+              />
             </div>
             <div className="space-y-4">
               <p className="text-xs text-text-secondary font-medium">支持换行、逗号、空格分隔手机号</p>
               <textarea
                 value={batchMobiles}
                 onChange={(e) => setBatchMobiles(e.target.value)}
-                className="w-full h-40 p-4 rounded-2xl outline-none resize-none text-sm font-medium transition-all duration-200 placeholder:text-slate-300 focus:outline-none"
-                style={{
-                  background: 'rgba(248,250,252,0.8)',
-                  border: '1px solid rgba(226,232,240,0.8)',
-                }}
+                className="form-input min-h-[170px] resize-none"
                 placeholder={"13800000001\n13800000002,13800000003"}
               />
-              <button
-                
+              <Button
                 onClick={handleBatchAdd}
                 disabled={isSubmitting}
-                className="w-full py-4 text-white font-bold rounded-2xl shadow-lg transition-all duration-200 disabled:opacity-50"
-                style={{
-                  background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
-                  boxShadow: '0 4px 16px rgba(22,93,255,0.3)',
-                }}
+                className="w-full"
+                size="lg"
               >
                 {isSubmitting ? <Loader2 className="animate-spin mx-auto" /> : '开始导入'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
