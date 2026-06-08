@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import {
   ChevronLeft,
   Plus,
@@ -107,24 +106,24 @@ const Whitelist = () => {
           <h2 className="ml-2 font-bold text-text-primary text-lg">白名单管理</h2>
         </div>
         <div className="flex space-x-1">
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            whileHover={{ scale: 1.08 }}
+          <button
+            
+            
             onClick={() => setShowBatchModal(true)}
             className="p-2 rounded-xl transition-all duration-200" style={{ color: '#165DFF' }}
             title="批量导入"
           >
             <Upload size={20} />
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            whileHover={{ scale: 1.08 }}
+          </button>
+          <button
+            
+            
             onClick={() => setShowAddModal(true)}
             className="p-2 rounded-xl transition-all duration-200" style={{ color: '#165DFF' }}
             title="添加单个"
           >
             <Plus size={24} />
-          </motion.button>
+          </button>
         </div>
       </div>
 
@@ -223,8 +222,8 @@ const Whitelist = () => {
                   placeholder="13800000000"
                 />
               </div>
-              <motion.button
-                whileTap={{ scale: 0.95 }}
+              <button
+                
                 onClick={handleAdd}
                 disabled={isSubmitting}
                 className="w-full py-4 text-white font-bold rounded-2xl shadow-lg transition-all duration-200 disabled:opacity-50"
@@ -234,7 +233,7 @@ const Whitelist = () => {
                 }}
               >
                 {isSubmitting ? <Loader2 className="animate-spin mx-auto" /> : '确认添加'}
-              </motion.button>
+              </button>
             </div>
           </div>
         </div>
@@ -267,8 +266,8 @@ const Whitelist = () => {
                 }}
                 placeholder={"13800000001\n13800000002,13800000003"}
               />
-              <motion.button
-                whileTap={{ scale: 0.95 }}
+              <button
+                
                 onClick={handleBatchAdd}
                 disabled={isSubmitting}
                 className="w-full py-4 text-white font-bold rounded-2xl shadow-lg transition-all duration-200 disabled:opacity-50"
@@ -278,7 +277,7 @@ const Whitelist = () => {
                 }}
               >
                 {isSubmitting ? <Loader2 className="animate-spin mx-auto" /> : '开始导入'}
-              </motion.button>
+              </button>
             </div>
           </div>
         </div>

@@ -69,7 +69,7 @@ const AccountManagement = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                whileTap={{ scale: 0.97 }}
+                
                 onClick={() => handleSwitch(account.user.uid)}
                 className={`p-4 rounded-2xl border transition-all duration-200 cursor-pointer flex items-center justify-between group ${
                   account.user.uid === activeUid
@@ -129,9 +129,9 @@ const AccountManagement = () => {
             ))}
           </AnimatePresence>
 
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            whileHover={{ scale: 1.02 }}
+          <button
+            
+            
             onClick={() => navigate('/login')}
             className="w-full p-4 rounded-2xl border-2 border-dashed flex items-center justify-center space-x-2 transition-all duration-200 font-bold"
             style={{
@@ -142,7 +142,7 @@ const AccountManagement = () => {
           >
             <Plus size={20} />
             <span>添加新账号</span>
-          </motion.button>
+          </button>
         </div>
 
         <div className="pt-8 text-center pb-8">

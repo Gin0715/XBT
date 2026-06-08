@@ -244,8 +244,8 @@ const BMapPicker: React.FC<BMapPickerProps> = ({
 
             {/* Auto-locate button */}
             {mapReady && (
-              <motion.button
-                whileTap={{ scale: 0.9 }}
+              <button
+                
                 onClick={handleAutoLocate}
                 className="absolute top-3 right-3 z-10 w-10 h-10 rounded-xl flex items-center justify-center shadow-lg backdrop-blur transition-all active:scale-90"
                 style={{
@@ -255,7 +255,7 @@ const BMapPicker: React.FC<BMapPickerProps> = ({
                 title="定位到当前 GPS 位置"
               >
                 <Crosshair size={18} style={{ color: '#3388ff' }} />
-              </motion.button>
+              </button>
             )}
           </div>
 
@@ -327,8 +327,8 @@ const BMapPicker: React.FC<BMapPickerProps> = ({
               >
                 取消
               </button>
-              <motion.button
-                whileTap={{ scale: 0.95 }}
+              <button
+                
                 onClick={handleConfirm}
                 disabled={!selectedPos}
                 className={`flex-[2] py-3 rounded-xl text-xs font-semibold text-white shadow-lg flex items-center justify-center gap-1.5 transition-all ${
@@ -345,7 +345,7 @@ const BMapPicker: React.FC<BMapPickerProps> = ({
               >
                 <CheckCircle2 size={14} strokeWidth={2.5} />
                 确认使用此位置
-              </motion.button>
+              </button>
             </div>
           </div>
         </motion.div>

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit3, Save, Crosshair, MapPin } from 'lucide-react';
+import { Plus, Edit3, Save, Crosshair, MapPin, Search } from 'lucide-react';
 import { sanitizeCoord } from '../../utils/coords';
 import BMapPicker from './BMapPicker';
+import AddressSearch from './AddressSearch';
 
 export interface LocationFormData {
   name: string;
@@ -39,6 +40,7 @@ export const LocationForm: React.FC<LocationFormProps> = ({
 }) => {
   const isAdd = mode === 'add';
   const [showMapPicker, setShowMapPicker] = useState(false);
+  const [showAddressSearch, setShowAddressSearch] = useState(false);
 
   const handleMapPick = (lat: number, lng: number, address: string) => {
     const newForm: LocationFormData = {
@@ -138,8 +140,8 @@ export const LocationForm: React.FC<LocationFormProps> = ({
         {isAdd && (
           <>
             {onFillGPS && (
-              <motion.button
-                whileTap={{ scale: 0.9 }}
+              <button
+                
                 onClick={onFillGPS}
                 disabled={!hasLocation}
                 className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl disabled:opacity-30 flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
@@ -152,10 +154,24 @@ export const LocationForm: React.FC<LocationFormProps> = ({
               >
                 <Crosshair size={14} />
                 <span className="hidden sm:inline text-[11px]">定位</span>
-              </motion.button>
+              </button>
             )}
-            <motion.button
-              whileTap={{ scale: 0.9 }}
+            <button
+
+              onClick={() => setShowAddressSearch(true)}
+              className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
+              style={{
+                color: '#8b5cf6',
+                background: 'rgba(139,92,246,0.08)',
+                border: '1px solid rgba(139,92,246,0.2)',
+              }}
+              title="搜索地址"
+            >
+              <Search size={14} />
+              <span className="hidden sm:inline text-[11px]">搜索</span>
+            </button>
+            <button
+
               onClick={() => setShowMapPicker(true)}
               className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
               style={{
@@ -167,7 +183,7 @@ export const LocationForm: React.FC<LocationFormProps> = ({
             >
               <MapPin size={14} />
               <span className="hidden sm:inline text-[11px]">选点</span>
-            </motion.button>
+            </button>
           </>
         )}
       </div>
@@ -191,8 +207,8 @@ export const LocationForm: React.FC<LocationFormProps> = ({
         >
           取消
         </button>
-        <motion.button
-          whileTap={{ scale: 0.95 }}
+        <button
+          
           onClick={onSave}
           className="px-5 py-2.5 text-xs font-semibold text-white rounded-xl shadow-lg flex items-center gap-1.5 transition-all duration-200"
           style={{
@@ -202,7 +218,7 @@ export const LocationForm: React.FC<LocationFormProps> = ({
         >
           <Save size={13} strokeWidth={2.5} />
           {isAdd ? '保存地址' : '保存修改'}
-        </motion.button>
+        </button>
       </div>
 
       {/* 百度地图选点器 */}
@@ -212,6 +228,24 @@ export const LocationForm: React.FC<LocationFormProps> = ({
         onConfirm={handleMapPick}
         initialLat={form.lat ? parseFloat(form.lat) : undefined}
         initialLng={form.lng ? parseFloat(form.lng) : undefined}
+      />
+
+      {/* 地址搜索 */}
+      <AddressSearch
+        open={showAddressSearch}
+        onClose={() => setShowAddressSearch(false)}
+        onConfirm={(lat, lng, address, name) => {
+          const newForm: LocationFormData = {
+            ...form,
+            lat: lat.toFixed(6),
+            lng: lng.toFixed(6),
+          };
+          if (isAdd) {
+            if (!form.name && name) newForm.name = name;
+            if (!form.description && address) newForm.description = address;
+          }
+          onChange(newForm);
+        }}
       />
     </motion.div>
   );

@@ -9,9 +9,9 @@ import { useAuthStore } from '../store/auth';
 import { ProgressCard } from '../components/sign/ProgressCard';
 import type { ApiResponse, SignStatusMessage, Classmate, User } from '../types';
 import scanCursor from '../assets/scan_cursor.png';
-import { getLocations, type LocationPreset } from '../api/location';
 import LiveLocationCard from '../components/location/LiveLocationCard';
 import BMapKeyConfig from '../components/location/BMapKeyConfig';
+import BMapPicker from '../components/location/BMapPicker';
 import { useLocationPanel } from '../hooks/useLocationPanel';
 
 interface QrData {
@@ -71,9 +71,9 @@ const FullScanner = () => {
   }, [isCameraReady]);
 
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
-  const [locationPresets, setLocationPresets] = useState<LocationPreset[]>([]);
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
 
-  // 实时定位 + 选中位置（统一 Hook 管理）
+  // 实时定位 + 选中位置 + 地址库（统一 Hook 管理，与 Lobby/SignDetail 同步）
   const {
     currentPosition,
     geoAddress,
@@ -81,21 +81,16 @@ const FullScanner = () => {
     isGeocoding,
     locateSuccess,
     handleLocate,
+    locationPresets,
+    fetchLocations,
     selectedLat: lat,
     selectedLng: lng,
     selectedAddress: locationStr,
     setSelectedLat: setLat,
     setSelectedLng: setLng,
     setSelectedAddress: setLocationStr,
+    setSelectedLocation,
   } = useLocationPanel({ autoFillForm: false });
-
-  // 加载位置预设
-  useEffect(() => {
-    getLocations().then(response => {
-      const data = (response.data as any)?.data || response.data || [];
-      setLocationPresets(Array.isArray(data) ? data : []);
-    }).catch(() => {});
-  }, []);
 
   const latRef = useRef('');
   const lngRef = useRef('');
@@ -987,7 +982,7 @@ const FullScanner = () => {
                   exit={{ x: -120, opacity: 0 }}
                   transition={{ ease: "easeInOut", duration: 0.3, delay: 0.1 }}
                   type="button" 
-                  onClick={() => setIsLocationPickerOpen(true)} 
+                  onClick={() => { setIsLocationPickerOpen(true); fetchLocations(); }}
                   className="flex flex-col items-center space-y-2 group pointer-events-auto active:scale-95 transition-transform"
                 >
                   <div className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg transition-colors ${lat ? 'bg-blue-600 text-white' : 'bg-black/40 text-white'}`}>
@@ -1066,6 +1061,19 @@ const FullScanner = () => {
                   </button>
                 )}
 
+                {/* 🗺️ 地图选点按钮 */}
+                <button
+                  onClick={() => setIsMapPickerOpen(true)}
+                  className="w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all btn-tap border-2"
+                  style={{
+                    borderColor: 'rgba(22,93,255,0.25)',
+                    color: '#165DFF',
+                    background: 'linear-gradient(135deg, rgba(239,244,255,0.8), rgba(238,242,255,0.8))',
+                  }}
+                >
+                  <MapPin size={16} /> 打开地图选点
+                </button>
+
                 <div onClick={() => { setLat(''); setLng(''); setLocationStr(''); setIsLocationPickerOpen(false); }}
                   className="btn-tap p-5 rounded-[1.5rem] border-2 transition-all cursor-pointer flex items-center justify-between"
                   style={{
@@ -1080,7 +1088,7 @@ const FullScanner = () => {
                   {!lat && <CheckCircle2 size={20} className="text-blue-600 shrink-0" />}
                 </div>
 
-                {locationPresets.map((p: LocationPreset) => {
+                {locationPresets.map((p) => {
                 const isSelected = p.lat === lat && p.lng === lng;
                 return (
                   <div key={p.id} onClick={() => { setLat(p.lat); setLng(p.lng); setLocationStr(p.description); setIsLocationPickerOpen(false); }}
@@ -1098,6 +1106,20 @@ const FullScanner = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 🗺️ 地图选点器 */}
+      <BMapPicker
+        open={isMapPickerOpen}
+        onClose={() => setIsMapPickerOpen(false)}
+        onConfirm={(lat, lng, address) => {
+          setSelectedLocation(lat.toFixed(6), lng.toFixed(6), address);
+          setIsMapPickerOpen(false);
+          setIsLocationPickerOpen(false);
+          toast.success('已选择地图位置');
+        }}
+        initialLat={lat ? parseFloat(lat) : undefined}
+        initialLng={lng ? parseFloat(lng) : undefined}
+      />
 
       <AnimatePresence initial={false}>
         {isStealthMode && isAllSuccess && (

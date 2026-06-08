@@ -21,8 +21,8 @@ export const LocationInput: React.FC<LocationInputProps> = ({ name, description,
       </p>
     </div>
     <motion.div
-      whileTap={{ scale: 0.98 }}
-      whileHover={{ scale: 1.01 }}
+      
+      
       onClick={onOpen}
       className="w-full p-4 rounded-2xl flex items-center justify-between cursor-pointer group transition-all duration-200 shadow-sm"
       style={{

@@ -397,11 +397,10 @@ const InlineKeyInput: React.FC<InlineKeyInputProps> = ({
         </button>
       )}
 
-      <motion.button
-        whileTap={{ scale: 0.95 }}
+      <button
         onClick={onSave}
         disabled={saving || !keyInput.trim()}
-        className="relative px-5 py-2.5 rounded-xl text-[11px] font-bold text-white shadow-lg flex items-center gap-2 transition-all duration-200 disabled:opacity-40 disabled:shadow-none"
+        className="btn-tap-sm relative px-5 py-2.5 rounded-xl text-[11px] font-bold text-white shadow-lg flex items-center gap-2 transition-all duration-200 disabled:opacity-40 disabled:shadow-none"
         style={{
           background: saving
             ? 'linear-gradient(135deg, #64748b, #94a3b8)'
@@ -414,7 +413,7 @@ const InlineKeyInput: React.FC<InlineKeyInputProps> = ({
         ) : (
           <><RefreshCw size={13} />{configured ? '更新并重载' : '保存并加载'}</>
         )}
-      </motion.button>
+      </button>
     </div>
   </div>
 );

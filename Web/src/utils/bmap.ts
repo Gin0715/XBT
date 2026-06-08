@@ -314,6 +314,156 @@ export async function searchNearbyPOI(
   return [];
 }
 
+// ---- 地点搜索结果类型 ----
+
+export interface BMapPlaceResult {
+  name: string;           // 地点名称
+  address: string;        // 详细地址
+  lat: number;            // 纬度 (BD-09)
+  lng: number;            // 经度 (BD-09)
+  city: string;           // 所在城市
+  district: string;       // 所在区县
+  business: string;       // 商圈
+  phone: string;          // 电话
+}
+
+/**
+ * 搜索地点（百度地图 LocalSearch）
+ * 输入关键词，返回匹配的地点列表，支持按城市限定
+ */
+export async function searchPlaces(keyword: string, city?: string): Promise<BMapPlaceResult[]> {
+  const w = window as any;
+  if (!bmapLoaded || !w.BMap || !w.BMap.LocalSearch) {
+    return [];
+  }
+
+  return new Promise((resolve) => {
+    // 用北京作为默认中心点（LocalSearch 需要第一个参数）
+    const center = new w.BMap.Point(116.404, 39.915);
+    const local = new w.BMap.LocalSearch(center, {
+      renderOptions: { map: null, autoViewport: false },
+      pageCapacity: 15,
+    });
+
+    local.setSearchCompleteCallback((results: any) => {
+      if (local.getStatus() === 0) { // BMAP_STATUS_SUCCESS
+        const resultArr: BMapPlaceResult[] = [];
+
+        // 优先使用 results 参数上的 getPoi API
+        const getCount = () => {
+          try { return results?.getCurrentNumPois?.() || local.getCurrentNumPois?.() || 0; } catch { return 0; }
+        };
+        const getPoi = (i: number) => {
+          try { return results?.getPoi?.(i) || local.getPoi?.(i) || null; } catch { return null; }
+        };
+
+        // 如果 getPoi API 可用，用它遍历
+        const count = getCount();
+        if (count > 0) {
+          for (let i = 0; i < count; i++) {
+            const poi = getPoi(i);
+            if (poi) {
+              resultArr.push({
+                name: poi.title || '',
+                address: poi.address || '',
+                lat: poi.point?.lat || 0,
+                lng: poi.point?.lng || 0,
+                city: poi.city || '',
+                district: poi.district || '',
+                business: poi.business || '',
+                phone: poi.phone || '',
+              });
+            }
+          }
+        } else {
+          // 降级：尝试从 results 的原始数组中读取（兼容 minified 属性）
+          const rawList = results?.Ar || results?.Sr || (Array.isArray(results) ? results : []);
+          if (Array.isArray(rawList)) {
+            rawList.forEach((p: any) => {
+              if (p) {
+                resultArr.push({
+                  name: p.title || p.name || '',
+                  address: p.address || '',
+                  lat: p.point?.lat || p.lat || 0,
+                  lng: p.point?.lng || p.lng || 0,
+                  city: p.city || '',
+                  district: p.district || '',
+                  business: p.business || '',
+                  phone: p.phone || '',
+                });
+              }
+            });
+          }
+        }
+
+        resolve(resultArr);
+      } else if (local.getStatus() === 1) { // BMAP_STATUS_CITY_LIST
+        // 城市列表状态 — 可能需要指定城市重新搜索
+        if (city) {
+          // 已经指定了城市还返回城市列表，跳过
+          resolve([]);
+        } else {
+          // 使用第一个城市自动搜索
+          try {
+            const cities = results?.Ba || results?.cityList || [];
+            if (cities.length > 0 && cities[0].city) {
+              local.search(keyword, { customCity: true, cityResults: true });
+              return;
+            }
+          } catch { /* ignore */ }
+          resolve([]);
+        }
+      } else {
+        resolve([]);
+      }
+    });
+
+    if (city) {
+      local.search(keyword, { customCity: true, cityResults: true });
+    } else {
+      local.search(keyword);
+    }
+
+    // 安全超时：10 秒后仍然没有回调则返回空
+    setTimeout(() => resolve([]), 10000);
+  });
+}
+
+/**
+ * 正向地理编码：地址 → 坐标（百度地图 Geocoder）
+ * 将文本地址转换为经纬度坐标 + 结构化地址
+ */
+export async function geocodeAddress(address: string): Promise<{ lat: number; lng: number; address: string } | null> {
+  const w = window as any;
+  if (!bmapLoaded || !w.BMap || !w.BMap.Geocoder) {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    const geocoder = new w.BMap.Geocoder();
+    geocoder.getPoint(address, (point: any) => {
+      if (point) {
+        // 再用逆地理编码获取完整地址信息
+        reverseGeocode(point.lat, point.lng).then((addr) => {
+          resolve({
+            lat: point.lat,
+            lng: point.lng,
+            address: addr.formattedAddress || address,
+          });
+        }).catch(() => {
+          resolve({
+            lat: point.lat,
+            lng: point.lng,
+            address,
+          });
+        });
+      } else {
+        resolve(null);
+      }
+    }, address.includes('市') ? undefined : '全城');
+  });
+}
+
 /**
  * 检查百度地图 SDK 是否已加载
  */

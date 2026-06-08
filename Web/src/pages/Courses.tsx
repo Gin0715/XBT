@@ -145,11 +145,10 @@ const Courses = () => {
             </div>
           ) : (
             (courses || []).map((course) => (
-              <motion.div
-                whileTap={{ scale: 0.97 }}
+              <div
                 key={course.class_id}
                 onClick={() => toggleSelection(course.class_id)}
-                className={`p-4 rounded-2xl border cursor-pointer flex items-center space-x-4 transition-all duration-200 ${
+                className={`btn-tap-sm p-4 rounded-2xl border cursor-pointer flex items-center space-x-4 transition-all duration-200 ${
                   course.is_selected
                     ? 'shadow-md'
                     : 'shadow-sm hover:border-slate-200'
@@ -196,7 +195,7 @@ const Courses = () => {
                   </div>
                   <div className="text-xs text-text-secondary mt-1 font-medium">{course.teacher}</div>
                 </div>
-              </motion.div>
+              </div>
             ))
           )}
         </div>

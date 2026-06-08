@@ -58,10 +58,7 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
         </div>
 
         {files.length > 0 && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            whileTap={{ scale: 0.9 }}
+          <button
             onClick={onClear}
             disabled={disabled}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-90"
@@ -72,7 +69,7 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
           >
             <Trash2 size={12} />
             清空
-          </motion.button>
+          </button>
         )}
       </div>
 
@@ -93,8 +90,6 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
                   initial={{ opacity: 0, scale: 0.85 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.85 }}
-                  transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-                  className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100 border shadow-sm group"
                   style={{ borderColor: 'rgba(226,232,240,0.5)' }}
                 >
                   <img
@@ -157,8 +152,8 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
 
       {/* Action buttons */}
       <div className="grid grid-cols-2 gap-3">
-        <motion.button
-          whileTap={{ scale: 0.95 }}
+        <button
+          
           type="button"
           disabled={disabled}
           onClick={() => galleryInputRef.current?.click()}
@@ -171,10 +166,10 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
         >
           <ImagePlus size={16} />
           <span>从相册选择</span>
-        </motion.button>
+        </button>
 
-        <motion.button
-          whileTap={{ scale: 0.95 }}
+        <button
+          
           type="button"
           disabled={disabled}
           onClick={onOpenCamera}
@@ -187,7 +182,7 @@ export const PhotoInput: React.FC<PhotoInputProps> = ({
         >
           <Camera size={16} />
           <span>进入相机拍摄</span>
-        </motion.button>
+        </button>
       </div>
 
       <input

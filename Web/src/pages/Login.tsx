@@ -130,9 +130,9 @@ const Login = () => {
           </div>
 
           {/* Submit */}
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            whileHover={{ scale: 1.02 }}
+          <button
+            
+            
             type="submit"
             disabled={isLoading}
             className="w-full flex items-center justify-center py-4 px-4 text-white font-semibold rounded-xl shadow-lg transition-all duration-200 disabled:opacity-50 disabled:scale-100"
@@ -146,7 +146,7 @@ const Login = () => {
             ) : (
               '登录 / 注册'
             )}
-          </motion.button>
+          </button>
         </form>
 
         <div className="mt-12 text-center" style={{ color: '#94A3B8', fontSize: '11px', lineHeight: '1.6' }}>

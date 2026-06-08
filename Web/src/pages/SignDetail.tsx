@@ -27,6 +27,7 @@ import { useLocationPanel, type LocationFormData } from '../hooks/useLocationPan
 import { LocationForm } from '../components/location/LocationForm';
 import BMapKeyConfig from '../components/location/BMapKeyConfig';
 import LiveLocationCard from '../components/location/LiveLocationCard';
+import BMapPicker from '../components/location/BMapPicker';
 
 import { GestureInput } from '../components/sign/GestureInput';
 import { PinInput } from '../components/sign/PinInput';
@@ -89,6 +90,7 @@ const SignDetail = () => {
 
   const [signCode, setSignCode] = useState('');
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
 
   const {
     locationPresets,
@@ -116,6 +118,7 @@ const SignDetail = () => {
     setSelectedLat: setLat,
     setSelectedLng: setLng,
     setSelectedAddress: setLocationStr,
+    setSelectedLocation,
   } = useLocationPanel({ autoFillForm: true });
 
   const [showProgress, setShowProgress] = useState(false);
@@ -757,6 +760,19 @@ const SignDetail = () => {
                   </button>
                 )}
 
+                {/* 🗺️ 地图选点按钮 */}
+                <button
+                  onClick={() => setIsMapPickerOpen(true)}
+                  className="w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all btn-tap border-2"
+                  style={{
+                    borderColor: 'rgba(22,93,255,0.25)',
+                    color: '#165DFF',
+                    background: 'linear-gradient(135deg, rgba(239,244,255,0.8), rgba(238,242,255,0.8))',
+                  }}
+                >
+                  <MapPin size={16} /> 打开地图选点
+                </button>
+
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#36D399' }} />
@@ -925,6 +941,21 @@ const SignDetail = () => {
             </motion.div>
           </motion.div>
         )}
+
+        {/* 🗺️ 地图选点器 */}
+        <BMapPicker
+          open={isMapPickerOpen}
+          onClose={() => setIsMapPickerOpen(false)}
+          onConfirm={(lat, lng, address) => {
+            setSelectedLocation(lat.toFixed(6), lng.toFixed(6), address);
+            setIsMapPickerOpen(false);
+            setIsLocationPickerOpen(false);
+            toast.success('已选择地图位置');
+          }}
+          initialLat={lat ? parseFloat(lat) : undefined}
+          initialLng={lng ? parseFloat(lng) : undefined}
+        />
+
         {showProgress && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] flex items-end justify-center p-0"

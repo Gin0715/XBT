@@ -627,10 +627,9 @@ const FullPhoto = () => {
         )}
 
         <div className="flex items-center gap-6">
-          <motion.button
-            whileTap={{ scale: 0.9 }}
+          <button
             onClick={() => setShowCameraList(true)}
-            className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md active:scale-90 transition-all"
+            className="btn-tap w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md transition-all"
             style={{
               background: 'rgba(255,255,255,0.12)',
               border: '1px solid rgba(255,255,255,0.15)',
@@ -638,12 +637,11 @@ const FullPhoto = () => {
               boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
             }}>
             <Camera size={20} />
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.9 }}
+          </button>
+          <button
             onClick={handleCapture}
             disabled={isCapturing}
-            className="w-[72px] h-[72px] rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform disabled:opacity-50"
+            className="btn-tap w-[72px] h-[72px] rounded-full flex items-center justify-center shadow-2xl transition-transform disabled:opacity-50"
             style={{
               background: 'linear-gradient(135deg, #fff, #f1f5f9)',
               boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
@@ -660,11 +658,10 @@ const FullPhoto = () => {
                 <div className="w-[44px] h-[44px] rounded-full" style={{ background: '#1e293b' }} />
               )}
             </div>
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.9 }}
+          </button>
+          <button
             onClick={() => setIsStealthMode(!isStealthMode)}
-            className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md active:scale-90 transition-all"
+            className="btn-tap w-14 h-14 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md transition-all"
             style={{
               background: isStealthMode
                 ? 'rgba(239,68,68,0.2)'
@@ -674,7 +671,7 @@ const FullPhoto = () => {
               boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
             }}>
             {isStealthMode ? <EyeOff size={20} /> : <Eye size={20} />}
-          </motion.button>
+          </button>
         </div>
       </div>
 
