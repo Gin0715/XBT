@@ -24,3 +24,11 @@ activity_list_limit: 5
 
 # postgres 数据库连接字符串
 postgres_dsn: "host=example.com port=5432 user=admin password=114514 dbname=xbt sslmode=disable TimeZone=Asia/Shanghai"
+
+# redis 连接，用于百度地图搜索缓存
+redis_addr: "127.0.0.1:6379"
+redis_password: ""
+redis_db: 0
+
+# 后端百度地图 API Key，用于代理搜索请求
+baidu_map_ak: "your_baidu_map_api_key"

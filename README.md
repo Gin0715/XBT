@@ -54,6 +54,7 @@
 > 🗺️ 地图引擎：百度地图 (Baidu Maps) v3.0 — 支持自动定位与手动选点
 
 - **百度地图集成**：使用百度 JS API v3.0，精准 BD-09 坐标系
+- **地址搜索代理**：前端地址关键词搜索通过后端 `/api/bmap/search` 统一代理，后端 Redis 缓存 24 小时，显著降低百度地图 QPS
 - **API Key 运行时配置**：**无需修改 .env**，可直接在地址库面板中输入 Key，保存到 localStorage，支持显示/隐藏/清除
 - **自动获取定位**：点击「获取定位」按钮，浏览器 GPS 自动获取当前位置并填入坐标
 - **精密坐标仪表盘**：仪器风格 N/E 角标 + 等宽字体坐标显示，一目了然
@@ -129,7 +130,8 @@ flowchart LR
 | **地图服务** | 百度地图 v3.0（BD-09 坐标系）— 自动定位 + 逆地理编码 + 地图选点 |
 | **UI 动画** | framer-motion + **纯 CSS 过渡优化**（btn-tap、anim-slide-up 等性能工具类） |
 | **设计语言** | 玻璃拟态 (Glassmorphism) + 精密仪器风格坐标面板 |
-| **后端 Server** | Go 1.22 + Gin + GORM + JWT + YAML |
+| **后端 Server** | Go 1.22 + Gin + GORM + JWT + YAML + Redis 缓存代理 |
+| **缓存服务** | Redis（百度地图关键词搜索结果 24 小时缓存） |
 | **移动端 Android** | Kotlin + Jetpack Compose + CameraX + ML Kit |
 | **数据库** | PostgreSQL 14+ |
 | **部署** | Docker + Docker Compose |
@@ -175,6 +177,7 @@ XBT/
 │   ├── internal/
 │   │   ├── quiz/                 # ✨ 抢答模块
 │   │   ├── handler/
+│   │   │   ├── bmap.go           # 🧭 百度地图搜索代理接口
 │   │   │   ├── location.go       # 📍 地址库接口
 │   │   │   └── sign.go           # 签到接口
 │   │   ├── model/
@@ -257,6 +260,18 @@ docker-compose up -d
 ```bash
 # 编辑 Web/.env
 VITE_BAIDU_MAP_KEY=你的百度地图AK
+```
+
+### 🔧 后端 Redis & 代理配置
+
+后端通过 `/api/bmap/search` 代理百度地图关键词搜索，减少前端直接请求次数。
+请在 `Server/config.yaml` 中补充：
+
+```yaml
+redis_addr: "127.0.0.1:6379"
+redis_password: ""
+redis_db: 0
+baidu_map_ak: "your_baidu_map_api_key"
 ```
 
 > ⚠️ 方式一优先：运行时配置保存到 localStorage，优先级高于 `.env`

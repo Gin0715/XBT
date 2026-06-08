@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"log"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"xbt2/server/internal/config"
 	"xbt2/server/internal/db"
 	"xbt2/server/internal/handler"
@@ -14,6 +14,9 @@ import (
 	quizsvc "xbt2/server/internal/quiz/service"
 	"xbt2/server/internal/service"
 	"xbt2/server/internal/xxt"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -50,6 +53,17 @@ func main() {
 	monitorSvc := quizsvc.NewQuizMonitorService(database, xxtClient, credentialCrypto)
 	quizHandler := quizhandler.NewQuizHandler(database, xxtClient, credentialCrypto, monitorSvc)
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisAddr,
+		Password: cfg.RedisPassword,
+		DB:       cfg.RedisDB,
+	})
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		log.Fatalf("redis init failed: %v", err)
+	}
+
+	bmapHandler := handler.NewBMapHandler(redisClient, cfg.BaiduMapAK)
+
 	r := gin.Default()
 
 	api := r.Group("/api")
@@ -64,6 +78,7 @@ func main() {
 		{
 			authed.GET("/courses", courseHandler.List)
 			authed.POST("/courses/sync", courseHandler.Sync)
+			authed.GET("/bmap/search", bmapHandler.Search)
 			authed.PUT("/courses/selection", courseHandler.UpdateSelection)
 
 			authed.GET("/sign/activities", signHandler.Activities)
@@ -88,9 +103,9 @@ func main() {
 			authed.DELETE("/quiz/records", quizHandler.ClearRecords)
 			authed.GET("/quiz/activities", quizHandler.GetActivities)
 			authed.POST("/quiz/answer", quizHandler.SubmitAnswer)
-			authed.POST("/quiz/submit", quizHandler.SubmitAnswer)  // 前端兼容别名
-			authed.GET("/quiz/events", quizHandler.Events)       // SSE 实时事件推送
-			authed.GET("/quiz/ws", quizHandler.WS)             // WebSocket 实时推送（前端）
+			authed.POST("/quiz/submit", quizHandler.SubmitAnswer) // 前端兼容别名
+			authed.GET("/quiz/events", quizHandler.Events)        // SSE 实时事件推送
+			authed.GET("/quiz/ws", quizHandler.WS)                // WebSocket 实时推送（前端）
 
 			admin := authed.Group("/admin")
 			admin.Use(middleware.AdminOnly())

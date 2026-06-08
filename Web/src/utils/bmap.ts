@@ -12,6 +12,8 @@
  * 百度地图坐标拾取工具：https://lbs.baidu.com/maptool/getpoint
  */
 
+import { useAuthStore } from '../store/auth';
+
 // ---- localStorage key ----
 const STORAGE_KEY = 'baidu_map_key';
 
@@ -332,101 +334,44 @@ export interface BMapPlaceResult {
  * 输入关键词，返回匹配的地点列表，支持按城市限定
  */
 export async function searchPlaces(keyword: string, city?: string): Promise<BMapPlaceResult[]> {
-  const w = window as any;
-  if (!bmapLoaded || !w.BMap || !w.BMap.LocalSearch) {
+  if (!keyword.trim()) {
     return [];
   }
 
-  return new Promise((resolve) => {
-    // 用北京作为默认中心点（LocalSearch 需要第一个参数）
-    const center = new w.BMap.Point(116.404, 39.915);
-    const local = new w.BMap.LocalSearch(center, {
-      renderOptions: { map: null, autoViewport: false },
-      pageCapacity: 15,
-    });
+  const query = new URLSearchParams({ keyword: keyword.trim() });
+  if (city) {
+    query.set('city', city);
+  }
 
-    local.setSearchCompleteCallback((results: any) => {
-      if (local.getStatus() === 0) { // BMAP_STATUS_SUCCESS
-        const resultArr: BMapPlaceResult[] = [];
+  const token = useAuthStore.getState().token;
+  const headers: Record<string, string> = { 'Accept': 'application/json' };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
-        // 优先使用 results 参数上的 getPoi API
-        const getCount = () => {
-          try { return results?.getCurrentNumPois?.() || local.getCurrentNumPois?.() || 0; } catch { return 0; }
-        };
-        const getPoi = (i: number) => {
-          try { return results?.getPoi?.(i) || local.getPoi?.(i) || null; } catch { return null; }
-        };
-
-        // 如果 getPoi API 可用，用它遍历
-        const count = getCount();
-        if (count > 0) {
-          for (let i = 0; i < count; i++) {
-            const poi = getPoi(i);
-            if (poi) {
-              resultArr.push({
-                name: poi.title || '',
-                address: poi.address || '',
-                lat: poi.point?.lat || 0,
-                lng: poi.point?.lng || 0,
-                city: poi.city || '',
-                district: poi.district || '',
-                business: poi.business || '',
-                phone: poi.phone || '',
-              });
-            }
-          }
-        } else {
-          // 降级：尝试从 results 的原始数组中读取（兼容 minified 属性）
-          const rawList = results?.Ar || results?.Sr || (Array.isArray(results) ? results : []);
-          if (Array.isArray(rawList)) {
-            rawList.forEach((p: any) => {
-              if (p) {
-                resultArr.push({
-                  name: p.title || p.name || '',
-                  address: p.address || '',
-                  lat: p.point?.lat || p.lat || 0,
-                  lng: p.point?.lng || p.lng || 0,
-                  city: p.city || '',
-                  district: p.district || '',
-                  business: p.business || '',
-                  phone: p.phone || '',
-                });
-              }
-            });
-          }
-        }
-
-        resolve(resultArr);
-      } else if (local.getStatus() === 1) { // BMAP_STATUS_CITY_LIST
-        // 城市列表状态 — 可能需要指定城市重新搜索
-        if (city) {
-          // 已经指定了城市还返回城市列表，跳过
-          resolve([]);
-        } else {
-          // 使用第一个城市自动搜索
-          try {
-            const cities = results?.Ba || results?.cityList || [];
-            if (cities.length > 0 && cities[0].city) {
-              local.search(keyword, { customCity: true, cityResults: true });
-              return;
-            }
-          } catch { /* ignore */ }
-          resolve([]);
-        }
-      } else {
-        resolve([]);
-      }
-    });
-
-    if (city) {
-      local.search(keyword, { customCity: true, cityResults: true });
-    } else {
-      local.search(keyword);
-    }
-
-    // 安全超时：10 秒后仍然没有回调则返回空
-    setTimeout(() => resolve([]), 10000);
+  const response = await fetch(`/api/bmap/search?${query.toString()}`, {
+    method: 'GET',
+    headers,
   });
+
+  if (!response.ok) {
+    console.warn('[BMap] 后端代理搜索失败', await response.text());
+    return [];
+  }
+
+  const data = await response.json();
+  const results = Array.isArray(data.results) ? data.results : [];
+
+  return results.map((item: any) => ({
+    name: item.name || '',
+    address: item.address || item.address_detail?.address || '',
+    lat: item.location?.lat || 0,
+    lng: item.location?.lng || 0,
+    city: item.city || item.address_detail?.city || '',
+    district: item.area || item.address_detail?.district || '',
+    business: item.business || '',
+    phone: item.telephone || '',
+  }));
 }
 
 /**

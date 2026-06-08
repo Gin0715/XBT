@@ -17,6 +17,10 @@ type Config struct {
 	ChaoxingUserAgent string `yaml:"chaoxing_user_agent"`
 	ActivityListLimit int    `yaml:"activity_list_limit"`
 	PostgresDSN       string `yaml:"postgres_dsn"`
+	RedisAddr         string `yaml:"redis_addr"`
+	RedisPassword     string `yaml:"redis_password"`
+	RedisDB           int    `yaml:"redis_db"`
+	BaiduMapAK        string `yaml:"baidu_map_ak"`
 }
 
 func Load() Config {
@@ -32,6 +36,9 @@ func Load() Config {
 
 	if cfg.ActivityListLimit <= 0 {
 		cfg.ActivityListLimit = 5
+	}
+	if cfg.RedisAddr == "" {
+		cfg.RedisAddr = "127.0.0.1:6379"
 	}
 	return cfg
 }

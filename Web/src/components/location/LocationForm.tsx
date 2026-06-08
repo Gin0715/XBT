@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit3, Save, Crosshair, MapPin, Search } from 'lucide-react';
+import { Plus, Edit3, Save, Crosshair, MapPin, Search, CheckCircle2 } from 'lucide-react';
 import { sanitizeCoord } from '../../utils/coords';
 import BMapPicker from './BMapPicker';
 import AddressSearch from './AddressSearch';
@@ -41,6 +41,31 @@ export const LocationForm: React.FC<LocationFormProps> = ({
   const isAdd = mode === 'add';
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [showAddressSearch, setShowAddressSearch] = useState(false);
+  const [fillFeedback, setFillFeedback] = useState<'search' | 'map' | 'gps' | null>(null);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout>>(null);
+
+  // 坐标填充成功后的视觉反馈（1.5s 后自动消失）
+  useEffect(() => {
+    if (fillFeedback) {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = setTimeout(() => setFillFeedback(null), 1500);
+    }
+    return () => { if (feedbackTimer.current) clearTimeout(feedbackTimer.current); };
+  }, [fillFeedback]);
+
+  const handleSearchConfirm = (lat: number, lng: number, address: string, name: string) => {
+    const newForm: LocationFormData = {
+      ...form,
+      lat: lat.toFixed(6),
+      lng: lng.toFixed(6),
+    };
+    if (isAdd) {
+      if (!form.name && name) newForm.name = name;
+      if (!form.description && address) newForm.description = address;
+    }
+    onChange(newForm);
+    setFillFeedback('search');
+  };
 
   const handleMapPick = (lat: number, lng: number, address: string) => {
     const newForm: LocationFormData = {
@@ -52,6 +77,12 @@ export const LocationForm: React.FC<LocationFormProps> = ({
       if (!form.description && address) newForm.description = address;
     }
     onChange(newForm);
+    setFillFeedback('map');
+  };
+
+  const handleFillGPS = () => {
+    if (onFillGPS) onFillGPS();
+    setFillFeedback('gps');
   };
 
   const accentColors = isAdd
@@ -122,69 +153,121 @@ export const LocationForm: React.FC<LocationFormProps> = ({
       />
 
       {/* Coordinates — min-w-0 prevents flex children from overflowing */}
-      <div className="flex sm:flex-row flex-col gap-1.5 sm:gap-2 min-w-0">
-        <input
-          placeholder="经度 lng *"
-          value={form.lng}
-          onChange={(e) => onChange({ ...form, lng: sanitizeCoord(e.target.value) })}
-          className="flex-1 min-w-0 px-2.5 sm:px-4 py-3 text-[13px] sm:text-sm font-mono border rounded-xl outline-none placeholder:text-slate-300 transition-all duration-200"
-          style={{ borderColor: 'rgba(226,232,240,0.8)', background: 'rgba(255,255,255,0.8)' }}
-        />
-        <input
-          placeholder="纬度 lat *"
-          value={form.lat}
-          onChange={(e) => onChange({ ...form, lat: sanitizeCoord(e.target.value) })}
-          className="flex-1 min-w-0 px-2.5 sm:px-4 py-3 text-[13px] sm:text-sm font-mono border rounded-xl outline-none placeholder:text-slate-300 transition-all duration-200"
-          style={{ borderColor: 'rgba(226,232,240,0.8)', background: 'rgba(255,255,255,0.8)' }}
-        />
+      <div className="space-y-2 min-w-0">
+        <div className="flex sm:flex-row flex-col gap-1.5 sm:gap-2 min-w-0">
+          <input
+            placeholder="经度 lng *"
+            value={form.lng}
+            onChange={(e) => onChange({ ...form, lng: sanitizeCoord(e.target.value) })}
+            className="flex-1 min-w-0 px-2.5 sm:px-4 py-3 text-[13px] sm:text-sm font-mono border rounded-xl outline-none placeholder:text-slate-300 transition-all duration-200"
+            style={{ borderColor: 'rgba(226,232,240,0.8)', background: 'rgba(255,255,255,0.8)' }}
+          />
+          <input
+            placeholder="纬度 lat *"
+            value={form.lat}
+            onChange={(e) => onChange({ ...form, lat: sanitizeCoord(e.target.value) })}
+            className="flex-1 min-w-0 px-2.5 sm:px-4 py-3 text-[13px] sm:text-sm font-mono border rounded-xl outline-none placeholder:text-slate-300 transition-all duration-200"
+            style={{ borderColor: 'rgba(226,232,240,0.8)', background: 'rgba(255,255,255,0.8)' }}
+          />
+        </div>
+
         {isAdd && (
-          <>
-            {onFillGPS && (
+          <div className="space-y-1.5">
+            {/* 快捷获取坐标方式说明 */}
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1" style={{ background: 'rgba(226,232,240,0.5)' }} />
+              <span className="text-[9px] font-bold tracking-wider text-text-muted/60 uppercase">
+                <span className="hidden sm:inline">快捷获取坐标</span>
+                <span className="sm:hidden">坐标</span>
+              </span>
+              <div className="h-px flex-1" style={{ background: 'rgba(226,232,240,0.5)' }} />
+            </div>
+
+            <div className="flex gap-1.5 sm:gap-2 min-w-0">
+              {/* 名称搜索 */}
               <button
-                
-                onClick={onFillGPS}
-                disabled={!hasLocation}
-                className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl disabled:opacity-30 flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
+                onClick={() => setShowAddressSearch(true)}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-2.5 text-[10px] sm:text-xs font-bold rounded-xl transition-all duration-200 btn-tap-sm relative overflow-hidden ${
+                  fillFeedback === 'search' ? 'ring-2' : ''
+                }`}
                 style={{
-                  color: '#00B42A',
-                  background: 'rgba(0,180,42,0.08)',
-                  border: '1px solid rgba(0,180,42,0.2)',
+                  color: '#8b5cf6',
+                  background: fillFeedback === 'search' ? 'rgba(139,92,246,0.18)' : 'rgba(139,92,246,0.08)',
+                  borderColor: fillFeedback === 'search' ? 'rgba(139,92,246,0.5)' : 'rgba(139,92,246,0.2)',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
                 }}
-                title="填入当前定位"
+                title="输入关键词搜索百度地图POI，自动填入坐标和地址"
               >
-                <Crosshair size={14} />
-                <span className="hidden sm:inline text-[11px]">定位</span>
+                {fillFeedback === 'search' ? (
+                  <CheckCircle2 size={13} className="shrink-0" />
+                ) : (
+                  <Search size={13} className="shrink-0" />
+                )}
+                <span className="truncate">
+                  {fillFeedback === 'search' ? '已填入' : '名称搜索'}
+                </span>
               </button>
-            )}
-            <button
 
-              onClick={() => setShowAddressSearch(true)}
-              className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
-              style={{
-                color: '#8b5cf6',
-                background: 'rgba(139,92,246,0.08)',
-                border: '1px solid rgba(139,92,246,0.2)',
-              }}
-              title="搜索地址"
-            >
-              <Search size={14} />
-              <span className="hidden sm:inline text-[11px]">搜索</span>
-            </button>
-            <button
+              {/* 地图选点 */}
+              <button
+                onClick={() => setShowMapPicker(true)}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-2.5 text-[10px] sm:text-xs font-bold rounded-xl transition-all duration-200 btn-tap-sm ${
+                  fillFeedback === 'map' ? 'ring-2' : ''
+                }`}
+                style={{
+                  color: '#3388ff',
+                  background: fillFeedback === 'map' ? 'rgba(51,136,255,0.18)' : 'rgba(51,136,255,0.08)',
+                  borderColor: fillFeedback === 'map' ? 'rgba(51,136,255,0.5)' : 'rgba(51,136,255,0.2)',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                }}
+                title="打开百度地图，点击任意位置选取经纬度"
+              >
+                {fillFeedback === 'map' ? (
+                  <CheckCircle2 size={13} className="shrink-0" />
+                ) : (
+                  <MapPin size={13} className="shrink-0" />
+                )}
+                <span className="truncate">
+                  {fillFeedback === 'map' ? '已填入' : '地图选点'}
+                </span>
+              </button>
 
-              onClick={() => setShowMapPicker(true)}
-              className="px-2 sm:px-3 py-3 text-xs font-bold rounded-xl flex-shrink-0 flex items-center gap-0.5 sm:gap-1 transition-colors active:scale-90"
-              style={{
-                color: '#3388ff',
-                background: 'rgba(51,136,255,0.08)',
-                border: '1px solid rgba(51,136,255,0.2)',
-              }}
-              title="百度地图选点"
-            >
-              <MapPin size={14} />
-              <span className="hidden sm:inline text-[11px]">选点</span>
-            </button>
-          </>
+              {/* GPS定位 */}
+              {onFillGPS && (
+                <button
+                  onClick={handleFillGPS}
+                  disabled={!hasLocation}
+                  className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-2.5 text-[10px] sm:text-xs font-bold rounded-xl transition-all duration-200 btn-tap-sm disabled:opacity-30 ${
+                    fillFeedback === 'gps' ? 'ring-2' : ''
+                  }`}
+                  style={{
+                    color: '#00B42A',
+                    background: fillFeedback === 'gps' ? 'rgba(0,180,42,0.18)' : 'rgba(0,180,42,0.08)',
+                    borderColor: fillFeedback === 'gps' ? 'rgba(0,180,42,0.5)' : 'rgba(0,180,42,0.2)',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                  }}
+                  title={`${hasLocation ? '填入当前 GPS 定位坐标' : '暂无定位数据，请先获取定位'}`}
+                >
+                  {fillFeedback === 'gps' ? (
+                    <CheckCircle2 size={13} className="shrink-0" />
+                  ) : (
+                    <Crosshair size={13} className="shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {fillFeedback === 'gps' ? '已填入' : 'GPS定位'}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {/* 辅助提示 */}
+            <p className="text-[9px] text-text-muted/50 text-center leading-relaxed">
+              搜索地名自动填全部 · 地图点击选精确坐标 · GPS填当前位置
+            </p>
+          </div>
         )}
       </div>
 
@@ -234,18 +317,7 @@ export const LocationForm: React.FC<LocationFormProps> = ({
       <AddressSearch
         open={showAddressSearch}
         onClose={() => setShowAddressSearch(false)}
-        onConfirm={(lat, lng, address, name) => {
-          const newForm: LocationFormData = {
-            ...form,
-            lat: lat.toFixed(6),
-            lng: lng.toFixed(6),
-          };
-          if (isAdd) {
-            if (!form.name && name) newForm.name = name;
-            if (!form.description && address) newForm.description = address;
-          }
-          onChange(newForm);
-        }}
+        onConfirm={handleSearchConfirm}
       />
     </motion.div>
   );

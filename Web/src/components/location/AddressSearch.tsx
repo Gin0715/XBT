@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, MapPin, Loader2, X, Navigation, Crosshair, ExternalLink } from 'lucide-react';
-import { searchPlaces, isBMapReady, type BMapPlaceResult } from '../../utils/bmap';
+import { searchPlaces, type BMapPlaceResult } from '../../utils/bmap';
 
 interface AddressSearchProps {
   /** 是否显示 */
@@ -25,7 +25,6 @@ const AddressSearch: React.FC<AddressSearchProps> = ({
   const [results, setResults] = useState<BMapPlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [noBMap, setNoBMap] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -35,8 +34,6 @@ const AddressSearch: React.FC<AddressSearchProps> = ({
   // 打开时自动聚焦
   useEffect(() => {
     if (open) {
-      setNoBMap(!isBMapReady());
-      // 延迟聚焦确保动画完成
       setTimeout(() => inputRef.current?.focus(), 350);
     } else {
       // 关闭时重置状态
@@ -186,31 +183,8 @@ const AddressSearch: React.FC<AddressSearchProps> = ({
 
             {/* Results area */}
             <div ref={searchContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 pb-safe-8 custom-scrollbar">
-              {/* 百度地图未加载 */}
-              {noBMap && (
-                <div className="flex flex-col items-center py-12 text-center space-y-3">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                    style={{ background: 'rgba(241,245,249,0.8)' }}>
-                    <Search size={24} className="text-slate-300" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-text-primary">百度地图未加载</p>
-                    <p className="text-xs text-text-muted mt-1">请先在地址库中配置百度地图 API Key</p>
-                  </div>
-                  <button
-                    onClick={onClose}
-                    className="px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-md transition-all active:scale-95"
-                    style={{
-                      background: 'linear-gradient(135deg, #3388ff, #1a56db)',
-                    }}
-                  >
-                    去配置 Key
-                  </button>
-                </div>
-              )}
-
               {/* 初始状态 */}
-              {!hasSearched && !noBMap && (
+              {!hasSearched && (
                 <div className="flex flex-col items-center py-10 text-center space-y-3">
                   <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
                     style={{ background: 'rgba(239,244,255,0.8)' }}>
