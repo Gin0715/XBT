@@ -830,7 +830,7 @@ export default function Quiz() {
                 )}
               </div>
 
-              <div ref={listScrollRef} onScroll={handleListScroll} className="max-h-[55vh] overflow-y-auto custom-scrollbar">
+              <div ref={listScrollRef} onScroll={handleListScroll} className="max-h-[55%] overflow-y-auto custom-scrollbar">
                 {/* Skeleton: monitoring but no activities yet */}
                 {status?.running && activities.length === 0 ? (
                   <div className="py-10 space-y-4 px-4">
@@ -1358,7 +1358,7 @@ export default function Quiz() {
                 <p className="text-xs text-slate-300 mt-1">启动监控后，抢答结果会显示在这里</p>
               </div>
             ) : (
-              <div className="divide-y max-h-[60vh] overflow-y-auto custom-scrollbar"
+              <div className="divide-y max-h-[60%] overflow-y-auto custom-scrollbar"
                 style={{ borderColor: 'rgba(226,232,240,0.3)' }}>
                 {records.map((r: any, idx: number) => (
                   <div key={idx} className="px-4 py-3.5 flex items-center gap-3 hover:bg-slate-50/50 transition-colors">

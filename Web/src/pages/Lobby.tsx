@@ -579,7 +579,7 @@ const Lobby = () => {
           >
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-              className="w-full sm:max-w-[460px] md:max-w-[500px] rounded-t-[2.5rem] overflow-hidden flex flex-col max-h-[85vh] max-h-[85dvh] sm:max-h-[80vh] sm:max-h-[80dvh] md:max-h-[75vh] md:max-h-[75dvh] glass-sheet"
+              className="w-full sm:max-w-[460px] md:max-w-[500px] rounded-t-[2.5rem] overflow-hidden flex flex-col max-h-[85%] sm:max-h-[80%] md:max-h-[75%] glass-sheet"
               onClick={e => e.stopPropagation()}
             >
               {/* Drag handle */}

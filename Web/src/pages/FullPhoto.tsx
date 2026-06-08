@@ -5,6 +5,7 @@ import { ChevronLeft, Camera, EyeOff, Eye, Loader2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button } from '../components/ui/Button';
 import { IconButton } from '../components/ui/IconButton';
+import { storePhotos } from '../utils/photoTransfer';
 
 type NativeCameraBridge = {
   isReady?: () => boolean;
@@ -500,15 +501,20 @@ const FullPhoto = () => {
     }
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     if (capturedFiles.length === 0) {
       navigate(-1);
       return;
     }
+    // 使用 sessionStorage + base64 传递照片，避免 HMR 重置模块变量导致数据丢失
+    await storePhotos(capturedFiles);
     navigate(`/sign/${activity.active_id}`, {
       state: {
-        ...location.state,
-        returnedPhotos: capturedFiles
+        activity: location.state?.activity,
+        course: location.state?.course,
+        selectedUids: location.state?.selectedUids,
+        classmates: location.state?.classmates,
+        _hasReturnedPhotos: true, // 仅用作信号，不存 File
       },
       replace: true
     });
@@ -651,7 +657,7 @@ const FullPhoto = () => {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] flex items-end justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto" onClick={() => setShowCameraList(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="bg-white w-full max-w-sm rounded-[2rem] p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-black mb-4 text-slate-900">选择摄像头</h3>
-              <div className="space-y-2 max-h-[40vh] overflow-y-auto custom-scrollbar">
+              <div className="space-y-2 max-h-[40%] overflow-y-auto custom-scrollbar">
                 {cameras.map(camera => (
                   <Button
                     key={camera.id}

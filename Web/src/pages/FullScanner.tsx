@@ -895,7 +895,7 @@ const FullScanner = () => {
       <AnimatePresence initial={false}>
         {isExecuting && !isStealthMode && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-30 flex items-end justify-center bg-black/20" onClick={closePopup}>
-            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="bg-white/70 backdrop-blur-md w-full rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0.4)] border-t border-white/20 flex flex-col max-h-[40vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="bg-white/70 backdrop-blur-md w-full rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0.4)] border-t border-white/20 flex flex-col max-h-[40%] overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="p-5 pt-7 shrink-0 flex items-center justify-between border-b border-black/5">
                 <div className="flex flex-col">
                   <div className="flex items-center space-x-2">
@@ -1034,7 +1034,7 @@ const FullScanner = () => {
       <AnimatePresence>
         {isLocationPickerOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[150] flex items-end justify-center bg-slate-900/60 backdrop-blur-md p-0" onClick={() => setIsLocationPickerOpen(false)}>
-            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 28, stiffness: 250 }} className="bg-white w-full max-w-[480px] rounded-t-[3rem] p-8 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 28, stiffness: 250 }} className="bg-white w-full max-w-[480px] rounded-t-[3rem] p-8 shadow-2xl overflow-hidden flex flex-col max-h-[80%]" onClick={(e) => e.stopPropagation()}>
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8 shrink-0" />
               <div className="flex items-center justify-between mb-6 shrink-0"><h3 className="text-xl font-bold text-slate-900">选择签到位置</h3><button onClick={() => setIsLocationPickerOpen(false)} className="w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-400 rounded-full">✕</button></div>
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-[calc(40px+var(--sab))] custom-scrollbar px-1">
@@ -1183,7 +1183,7 @@ const FullScanner = () => {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] flex items-end justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto" onClick={() => setShowCameraList(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="bg-white w-full max-w-sm rounded-[2rem] p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-black mb-4 text-slate-900">选择摄像头</h3>
-              <div className="space-y-2 max-h-[40vh] overflow-y-auto custom-scrollbar">
+              <div className="space-y-2 max-h-[40%] overflow-y-auto custom-scrollbar">
                 {cameras.map(camera => (
                   <Button
                     key={camera.id}

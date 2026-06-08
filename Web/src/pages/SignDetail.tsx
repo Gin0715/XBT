@@ -36,9 +36,9 @@ import { QrInput } from '../components/sign/QrInput';
 import { NormalInput } from '../components/sign/NormalInput';
 import { PhotoInput } from '../components/sign/PhotoInput';
 import { ProgressCard } from '../components/sign/ProgressCard';
-import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { GlassPanel } from '../components/ui/GlassPanel';
+import { takePhotos } from '../utils/photoTransfer';
 
 const MAX_PHOTO_UPLOAD_BYTES = 20 * 1024 * 1024;
 
@@ -157,13 +157,11 @@ const SignDetail = () => {
   }, [showProgress]);
 
   useEffect(() => {
-    const returnedPhotos = location.state?.returnedPhotos as File[];
-    if (returnedPhotos && returnedPhotos.length > 0) {
-      handlePhotoAdd(returnedPhotos);
-      // Clean up the returnedPhotos from location state to prevent double adding
-      window.history.replaceState({ ...location.state, returnedPhotos: undefined }, '');
+    const transferredPhotos = takePhotos();
+    if (transferredPhotos && transferredPhotos.length > 0) {
+      handlePhotoAdd(transferredPhotos);
     }
-  }, [location.state]);
+  }, [location.state?._hasReturnedPhotos]);
 
   useEffect(() => {
     photoPreviewUrlsRef.current = photoPreviewUrls;
@@ -287,7 +285,87 @@ const SignDetail = () => {
     setSelectedUids(selectedUids.length === classmates.length ? [] : classmates.map(c => c.uid));
   };
 
+
+  const handlePhotoExecute = async () => {
+    if (photoFiles.length === 0) {
+      toast.error('请先拍照或选择照片');
+      return;
+    }
+
+    setIsExecuting(true);
+    isExecutingRef.current = true;
+    setShowProgress(true);
+    setSignStatuses({});
+    abortControllerRef.current = new AbortController();
+
+    const targetUids: number[] = [];
+    if (currentUser?.uid) targetUids.push(currentUser.uid);
+    for (const uid of selectedUids) {
+      if (uid && !targetUids.includes(uid)) targetUids.push(uid);
+    }
+
+    const selectedFiles = [...photoFiles];
+    const assignments = buildPhotoAssignments(targetUids, selectedFiles);
+    const initialStatuses: Record<number, any> = {};
+    targetUids.forEach(uid => initialStatuses[uid] = { status: 'pending', message: '等待中' });
+    setSignStatuses(initialStatuses);
+
+    for (const uid of targetUids) {
+      if (!isExecutingRef.current) break;
+      setSignStatuses(prev => ({ ...prev, [uid]: { status: 'signing', message: '正在提交签到' } }));
+
+      const file = assignments.get(uid);
+      if (!file) {
+        setSignStatuses(prev => ({ ...prev, [uid]: { status: 'failed', message: '未找到可上传照片' } }));
+        continue;
+      }
+
+      try {
+        const formData = new FormData();
+        formData.append('activity_id', String(activity.active_id));
+        formData.append('course_id', String(activity.course_id));
+        formData.append('class_id', String(activity.class_id));
+        formData.append('target_uid', String(uid));
+        if (activity.if_refresh_ewm) {
+          formData.append('if_refresh_ewm', 'true');
+        }
+        // iOS Safari: append with explicit filename, otherwise multipart boundary
+        // may lack a proper Content-Disposition filename and the server rejects it
+        formData.append('file', file, file.name || 'photo.jpg');
+
+        const resp = await client.post<ApiResponse<any>>('/sign/photo', formData, {
+          signal: abortControllerRef.current?.signal,
+          timeout: 60000, // 60s timeout for photo upload (iOS large files)
+          // Prevent axios from setting Content-Type — let browser handle multipart boundary
+          headers: { 'Content-Type': undefined },
+          transformRequest: [(data) => data],
+        });
+
+        const res = resp.data.data;
+        if (res.success || res.already_signed) {
+          setSignStatuses(prev => ({ ...prev, [uid]: { status: 'success', message: res.message || '签到成功' } }));
+          if (uid !== currentUser?.uid) {
+            setClassmateSignStates(prev => ({
+              ...prev,
+              [uid]: { user_id: uid, signed: true, record_source: res.record_source, record_source_name: res.record_source_name, message: res.message || '已签到' },
+            }));
+          }
+        } else {
+          setSignStatuses(prev => ({ ...prev, [uid]: { status: 'failed', message: res.message || '签到失败' } }));
+        }
+      } catch (err: any) {
+        if (err.name === 'CanceledError' || err.name === 'AbortError') break;
+        setSignStatuses(prev => ({ ...prev, [uid]: { status: 'failed', message: err.message || '网络请求失败' } }));
+      }
+    }
+
+    setIsExecuting(false);
+    isExecutingRef.current = false;
+  };
+
+
   const handleExecute = async () => {
+    try {
     const selectedPhotoFiles = [...photoFiles];
 
     if ((activity.sign_type === 3 || activity.sign_type === 5) && (!signCode || signCode.length < 4)) {
@@ -390,10 +468,13 @@ const SignDetail = () => {
                 formData.append('class_id', String(activity.class_id));
                 formData.append('target_uid', String(uid));
                 formData.append('if_refresh_ewm', String(activity.if_refresh_ewm));
-                formData.append('file', assignedPhotoFile);
+                // iOS Safari: explicit filename prevents multipart boundary issues
+                formData.append('file', assignedPhotoFile, assignedPhotoFile.name || 'photo.jpg');
                 return formData;
               })(), {
-                signal: abortControllerRef.current?.signal
+                signal: abortControllerRef.current?.signal,
+                headers: { 'Content-Type': undefined },
+                transformRequest: [(data: any) => data],
               })
               : await client.post<ApiResponse<any>>('/sign/execute', {
                 activity_id: activity.active_id, target_uid: uid, sign_type: activity.sign_type,
@@ -459,6 +540,13 @@ const SignDetail = () => {
         isExecutingRef.current = false;
         abortControllerRef.current = null;
       }
+    }
+    } catch (err: any) {
+      console.error('handleExecute error:', err);
+      toast.error(err?.message || '执行签到操作时发生错误');
+      setIsExecuting(false);
+      isExecutingRef.current = false;
+      setShowProgress(false);
     }
   };
 
@@ -578,25 +666,37 @@ const SignDetail = () => {
               />
             </div>
           )}
+        </div>
 
-          <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
-            <Button
-              onClick={activity.sign_type === 2
-                ? () => navigate('/scanner', { state: { activity, course, selectedUids, classmates } })
-                : handleExecute
+        {/* Sign button — outside integrated panel, in normal document flow */}
+        <div className="px-6 pt-4 pb-safe-4">
+          <button
+            type="button"
+            onClick={() => {
+              if (isPhotoSign) {
+                handlePhotoExecute();
+              } else if (activity.sign_type === 2) {
+                navigate('/scanner', { state: { activity, course, selectedUids, classmates } });
+              } else {
+                handleExecute();
               }
-              disabled={isExecuting}
-              className="w-full py-3.5 flex items-center justify-center gap-3"
-            >
-              {isExecuting ? (
-                <Loader2 className="animate-spin" size={18} />
-              ) : activity.sign_type === 2 ? (
-                <><QrCode size={18} /> 去扫码签到</>
-              ) : (
-                <>{selectedUids.length > 0 ? `立即签到 (${selectedUids.length + 1})` : '立即签到'}</>
-              )}
-            </Button>
-          </div>
+            }}
+            disabled={isExecuting}
+            className="w-full py-4 rounded-2xl font-bold text-sm shadow-lg transition-all active:scale-[0.97] flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{
+              background: 'linear-gradient(135deg, #165DFF, #4f39d0)',
+              color: '#fff',
+              boxShadow: '0 8px 32px rgba(22,93,255,0.35)',
+            }}
+          >
+            {isExecuting ? (
+              <><Loader2 className="animate-spin" size={18} /> 签到中...</>
+            ) : activity.sign_type === 2 ? (
+              <><QrCode size={18} /> 去扫码签到</>
+            ) : (
+              <>{selectedUids.length > 0 ? `立即签到 (${selectedUids.length + 1})` : '立即签到'}</>
+            )}
+          </button>
         </div>
 
         {/* Classmate Selection */}
@@ -676,7 +776,7 @@ const SignDetail = () => {
             onClick={() => setIsLocationPickerOpen(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 250 }}
-              className="w-full sm:max-w-[460px] md:max-w-[500px] rounded-t-[2.5rem] p-4 sm:p-8 overflow-hidden flex flex-col max-h-[85vh] max-h-[85dvh] sm:max-h-[80vh] sm:max-h-[80dvh]"
+              className="w-full sm:max-w-[460px] md:max-w-[500px] rounded-t-[2.5rem] p-4 sm:p-8 overflow-hidden flex flex-col max-h-[85%] sm:max-h-[80%]"
               style={{
                 background: 'rgba(255,255,255,0.97)',
                 backdropFilter: 'blur(24px)',
@@ -949,7 +1049,7 @@ const SignDetail = () => {
             style={{ background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
             onClick={() => setShowProgress(false)}>
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full sm:max-w-[420px] rounded-t-[2.5rem] px-4 sm:px-8 pt-6 sm:pt-10 pb-0 flex flex-col max-h-[85vh] max-h-[85dvh] relative"
+              className="w-full sm:max-w-[420px] rounded-t-[2.5rem] px-4 sm:px-8 pt-6 sm:pt-10 pb-0 flex flex-col max-h-[75%] sm:max-h-[85%] relative"
               style={{
                 background: 'rgba(255,255,255,0.97)',
                 backdropFilter: 'blur(24px)',
@@ -958,7 +1058,7 @@ const SignDetail = () => {
                 border: '1px solid rgba(255,255,255,0.4)',
               }}
               onClick={(e) => e.stopPropagation()}>
-              <div className="absolute top-full left-0 right-0 h-screen bg-white" />
+
               <div className="flex items-center justify-between mb-8 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md"
@@ -973,7 +1073,7 @@ const SignDetail = () => {
                   <X size={18} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-1 pr-2 custom-scrollbar pb-safe-6">
+              <div className="flex-1 overflow-y-auto space-y-1 pr-2 custom-scrollbar pb-4 sm:pb-safe-6">
                 <ProgressCard name={currentUser?.name || "本人"} avatar={currentUser?.avatar} mobile={currentUser?.mobile || ""} isHost statusObj={signStatuses[currentUser?.uid || 0]} />
                 {selectedUids.filter(uid => uid !== currentUser?.uid).map(uid => {
                   const student = classmates.find(m => m.uid === uid);
