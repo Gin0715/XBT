@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, Zap, Loader2, Activity, Settings } from 'lucide-react';
+import { AlertCircle, Zap, Loader2, Activity, Settings, List } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
 import { useQuizMonitor } from '../hooks/useQuizMonitor';
 import { QuizList } from './QuizList';
 import { QuizLogs } from './QuizLogs';
+import { QuizLogView } from './QuizLogs';
 import { QuizControls } from './QuizControls';
 
-type TabType = 'activities' | 'settings';
+type TabType = 'activities' | 'settings' | 'logs';
 
 export default function Quiz() {
   const { isAuthenticated } = useAuthStore();
@@ -155,6 +156,17 @@ export default function Quiz() {
             <Settings className="w-3.5 h-3.5" />
             课程设置
           </button>
+          <button onClick={() => setActiveTab('logs')}
+            className={`flex-1 py-2.5 text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-200 ${
+              activeTab === 'logs'
+                ? 'text-white shadow-sm'
+                : 'text-text-muted hover:text-text-primary'
+            }`}
+            style={activeTab === 'logs' ? { background: 'linear-gradient(135deg, #165DFF, #4f39d0)', borderRadius: '12px' } : {}}
+          >
+            <List className="w-3.5 h-3.5" />
+            抢答日志
+          </button>
         </div>
 
         {/* Tab content */}
@@ -172,6 +184,8 @@ export default function Quiz() {
               <QuizLogs answerLogs={answerLogs} onExport={() => {}} />
             )}
           </>
+        ) : activeTab === 'logs' ? (
+          <QuizLogView visible={true} />
         ) : (
           <QuizControls
             config={config}

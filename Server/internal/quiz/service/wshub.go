@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -38,6 +40,7 @@ const (
 type WSConn struct {
 	conn     *websocket.Conn
 	userUID  int64
+	connID   string // 唯一标识，用于多连接管理
 	courseID int64
 	classID  int64
 	send     chan []byte
@@ -49,8 +52,9 @@ type WSConn struct {
 }
 
 // WSHub 管理所有前端 WebSocket 连接
+// 支持单用户多连接（每连接独立管理）
 type WSHub struct {
-	conns   map[int64]*WSConn // userUID → 唯一连接
+	conns   map[int64]map[string]*WSConn // userUID → map[connID]conn
 	mu      sync.RWMutex
 	monitor *QuizMonitor
 }
@@ -66,45 +70,51 @@ func (h *WSHub) SetMonitor(m *QuizMonitor) {
 
 func NewWSHub() *WSHub {
 	return &WSHub{
-		conns: make(map[int64]*WSConn),
+		conns: make(map[int64]map[string]*WSConn),
 	}
 }
 
-// Register 注册新连接，踢掉旧连接（单用户唯一连接）
-// 自动启动预热，确保用户点击一键抢答时秒级响应
+// generateConnID 生成唯一连接 ID（16 字节随机 hex）
+func generateConnID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
+// Register 注册新连接，支持单用户多连接共存
+// v2 改进：
+//   - 不再踢掉旧连接，同用户多个连接可以共存
+//   - 每个连接有独立 connID，后续断开时只移除对应连接
+//   - 自动启动预热（首个连接启动，后续连接复用已有预热）
 func (h *WSHub) Register(conn *websocket.Conn, userUID, courseID, classID int64) *WSConn {
 	h.mu.Lock()
-	// 踢掉旧连接（优雅关闭，等待 writePump 退出）
-	if old, exists := h.conns[userUID]; exists {
-		log.Printf("[WSHub] 踢掉旧连接: uid=%d", userUID)
-		old.shutdown() // 仅关闭 send channel，writePump 自行退出
-		// 等待旧 writePump 退出（最多 3s），释放 conn
-		select {
-		case <-old.done:
-		case <-time.After(3 * time.Second):
-			log.Printf("[WSHub] 旧连接 writePump 超时: uid=%d", userUID)
-		}
-		delete(h.conns, userUID)
-	}
 
+	connID := generateConnID()
 	wc := &WSConn{
 		conn:     conn,
 		userUID:  userUID,
+		connID:   connID,
 		courseID: courseID,
 		classID:  classID,
 		send:     make(chan []byte, 64),
 		hub:      h,
 		done:     make(chan struct{}),
 	}
-	h.conns[userUID] = wc
+
+	if h.conns[userUID] == nil {
+		h.conns[userUID] = make(map[string]*WSConn)
+	}
+	h.conns[userUID][connID] = wc
+	connCount := len(h.conns[userUID])
 	h.mu.Unlock()
 
-	log.Printf("[WSHub] ✅ 前端 WS 已连接: uid=%d course=%d class=%d", userUID, courseID, classID)
+	log.Printf("[WSHub] ✅ 前端 WS 已连接: uid=%d conn=%s course=%d class=%d (共%d个连接)",
+		userUID, connID[:8], courseID, classID, connCount)
 
 	go wc.writePump()
 	go wc.readPump()
 
-	// WS 连接时自动启动预热（低频率轮询保持缓存和 session 活跃）
+	// WS 连接时自动启动预热（仅当尚未运行时启动，由 monitor 内部去重）
 	if h.monitor != nil {
 		go h.monitor.StartPreWarmFromDB(userUID, courseID, classID)
 	}
@@ -112,63 +122,90 @@ func (h *WSHub) Register(conn *websocket.Conn, userUID, courseID, classID int64)
 	return wc
 }
 
-// Unregister 注销连接（WS 断开时完全停止监控和预热）
-func (h *WSHub) Unregister(userUID int64) {
+// Unregister 注销指定连接
+// v2 改进：接受 connID 参数，只移除对应连接，不影响同一用户的其他连接
+// 当用户所有连接都断开时，才会完全停止监控和预热
+func (h *WSHub) Unregister(userUID int64, connID ...string) {
 	h.mu.Lock()
-	// WS 断开时完全停止监控和预热
-	if h.monitor != nil {
-		h.monitor.FullStop(userUID)
-	}
-	if wc, exists := h.conns[userUID]; exists {
-		wc.closeMu.Lock()
-		isClosed := wc.closed
-		if !isClosed {
-			wc.closed = true
-			close(wc.send)
-		}
-		wc.closeMu.Unlock()
-		delete(h.conns, userUID)
-	}
-	h.mu.Unlock()
-}
+	defer h.mu.Unlock()
 
-// BroadcastToUser 向指定用户推送消息（非阻塞，连接已关闭时静默丢弃）
-func (h *WSHub) BroadcastToUser(userUID int64, msg WSMessage) {
-	h.mu.RLock()
-	wc, exists := h.conns[userUID]
-	h.mu.RUnlock()
+	conns, exists := h.conns[userUID]
 	if !exists {
 		return
 	}
+
+	// 如果提供了 connID，只移除指定连接
+	if len(connID) > 0 && connID[0] != "" {
+		if wc, ok := conns[connID[0]]; ok {
+			wc.closeMu.Lock()
+			if !wc.closed {
+				wc.closed = true
+				close(wc.send)
+			}
+			wc.closeMu.Unlock()
+			delete(conns, connID[0])
+			log.Printf("[WSHub] 移除连接: uid=%d conn=%s", userUID, connID[0][:8])
+		}
+	}
+
+	// 用户没有任何剩余连接 → 清理用户条目并停止预热
+	if len(h.conns[userUID]) == 0 {
+		delete(h.conns, userUID)
+		if h.monitor != nil {
+			h.monitor.FullStop(userUID)
+		}
+		log.Printf("[WSHub] 用户所有连接已断开: uid=%d（已停止预热）", userUID)
+	}
+}
+
+// BroadcastToUser 向指定用户的所有 WebSocket 连接推送消息（非阻塞）
+func (h *WSHub) BroadcastToUser(userUID int64, msg WSMessage) {
 	msg.Time = time.Now().UnixMilli()
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
-	wc.trySend(data)
+
+	h.mu.RLock()
+	conns, exists := h.conns[userUID]
+	h.mu.RUnlock()
+	if !exists {
+		return
+	}
+
+	for _, wc := range conns {
+		wc.trySend(data)
+	}
 }
 
-// BroadcastToCourse 向监控同一课程的所有用户推送消息
+// BroadcastToCourse 向监控同一课程的所有用户的所有连接推送消息
 func (h *WSHub) BroadcastToCourse(courseID int64, msg WSMessage) {
 	msg.Time = time.Now().UnixMilli()
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for _, wc := range h.conns {
-		if wc.courseID == courseID {
-			wc.trySend(data)
+	for _, conns := range h.conns {
+		for _, wc := range conns {
+			if wc.courseID == courseID {
+				wc.trySend(data)
+			}
 		}
 	}
 }
 
-// ConnCount 返回当前连接数
+// ConnCount 返回当前所有连接数（所有用户合计）
 func (h *WSHub) ConnCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return len(h.conns)
+	count := 0
+	for _, conns := range h.conns {
+		count += len(conns)
+	}
+	return count
 }
 
 // ==================== WSConn 方法 ====================
@@ -205,8 +242,8 @@ func (wc *WSConn) writePump() {
 	defer close(wc.done)
 	defer func() {
 		wc.conn.Close()
-		// 确保 hub 清理（可能已被 Unregister 清理，幂等安全）
-		wc.hub.Unregister(wc.userUID)
+		// 优雅退出时传入 connID 只移除本连接
+		wc.hub.Unregister(wc.userUID, wc.connID)
 	}()
 
 	ticker := time.NewTicker(25 * time.Second) // 25s ping
@@ -237,7 +274,7 @@ func (wc *WSConn) writePump() {
 
 // readPump 从客户端读取消息（主要处理 pong 和关闭）
 func (wc *WSConn) readPump() {
-	defer wc.hub.Unregister(wc.userUID)
+	defer wc.hub.Unregister(wc.userUID, wc.connID)
 
 	wc.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	wc.conn.SetPongHandler(func(string) error {
@@ -249,7 +286,7 @@ func (wc *WSConn) readPump() {
 		_, _, err := wc.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Printf("[WSHub] WS 读取异常: uid=%d err=%v", wc.userUID, err)
+				log.Printf("[WSHub] WS 读取异常: uid=%d conn=%s err=%v", wc.userUID, wc.connID[:8], err)
 			}
 			return
 		}

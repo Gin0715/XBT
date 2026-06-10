@@ -13,6 +13,7 @@ export interface QuizConfig {
   enabled: boolean;
   course_id: number;
   class_id: number;
+  course_ids: string;        // JSON: [{"course_id":123,"class_id":456},...]
 }
 
 export interface AnswerLog {
@@ -80,6 +81,7 @@ const DEFAULT_CONFIG: QuizConfig = {
   enabled: false,
   course_id: 0,
   class_id: 0,
+  course_ids: '',
 };
 
 const initialQuizState: QuizState = {

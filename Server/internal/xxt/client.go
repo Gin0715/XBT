@@ -392,7 +392,7 @@ func (c *Client) fetchActivesRaw(mobile, password string, courseID, classID int6
 		prevFirstBackoff = entry.firstBackoffAt
 	}
 	newEntry := &activesCacheEntry{
-		actives:        rawToActives(activeList, c.activeFetchMax, false),
+		actives:        rawToActives(activeList, c.activeFetchMax, false, courseID, classID),
 		timestamp:      time.Now(),
 		backoffCount:   prevBackoffCount,
 		firstBackoffAt: prevFirstBackoff,
@@ -461,7 +461,19 @@ func (c *Client) ResetQuizCache(courseID, classID int64) {
 	log.Printf("[xxt] 已清空抢答缓存: course=%d class=%d", courseID, classID)
 }
 
-func rawToActives(activeList []map[string]interface{}, max int, signOnly bool) []Active {
+// ResetSession 重置指定用户的 session 缓存（强制下次请求重新登录）
+func (c *Client) ResetSession(mobile string) {
+	c.sessionMu.Lock()
+	delete(c.sessions, mobile)
+	c.sessionMu.Unlock()
+	masked := mobile
+	if len(masked) > 7 {
+		masked = masked[:3] + "****" + masked[len(masked)-4:]
+	}
+	log.Printf("[xxt] 重置用户 Session: %s", masked)
+}
+
+func rawToActives(activeList []map[string]interface{}, max int, signOnly bool, courseID, classID int64) []Active {
 	out := make([]Active, 0)
 	seen := make(map[int64]struct{})
 	for _, a := range activeList {
@@ -485,10 +497,19 @@ func rawToActives(activeList []map[string]interface{}, max int, signOnly bool) [
 		st := int64FromAny(firstNonNil(a["startTime"], a["start_time"], a["startTimestamp"]))
 		et := int64FromAny(firstNonNil(a["endTime"], a["end_time"], a["endTimestamp"]))
 		status := int(int64FromAny(firstNonNil(a["status"], a["state"])))
+		// 提取课程/班级ID
+		actCourseID := int64FromAny(firstNonNil(a["courseId"], a["course_id"]))
+		actClassID := int64FromAny(firstNonNil(a["classId"], a["class_id"]))
+		if actCourseID == 0 && courseID > 0 {
+			actCourseID = courseID
+			actClassID = classID
+		}
 		out = append(out, Active{
 			ActiveID:   id,
 			Name:       name,
 			ActiveType: activeType,
+			CourseID:   actCourseID,
+			ClassID:    actClassID,
 			StartTime:  st,
 			EndTime:    et,
 			Status:     status,
@@ -573,7 +594,7 @@ func (c *Client) GetActivesAll(mobile, password string, courseID, classID int64)
 		c.cacheMu.RUnlock()
 		return []Active{}, nil
 	}
-	return rawToActives(activeList, c.activeFetchMax, false), nil
+	return rawToActives(activeList, c.activeFetchMax, false, courseID, classID), nil
 }
 
 // GetActivesAllFast 抢答专用快速获取（200ms 缓存，极速模式 100ms 轮询）
@@ -589,7 +610,7 @@ func (c *Client) GetActivesAllFast(mobile, password string, courseID, classID in
 		c.cacheMu.RUnlock()
 		return []Active{}, nil
 	}
-	return rawToActives(activeList, c.activeFetchMax, false), nil
+	return rawToActives(activeList, c.activeFetchMax, false, courseID, classID), nil
 }
 
 // GetActivesAllForce 强制从超星拉取最新活动列表（绕过缓存和风控退避）
@@ -632,14 +653,14 @@ func (c *Client) GetActivesAllForce(mobile, password string, courseID, classID i
 	now := time.Now()
 	cacheKey := fmt.Sprintf("quiz:%d:%d", courseID, classID)
 	c.activesCache[cacheKey] = &activesCacheEntry{
-		actives:        rawToActives(activeList, c.activeFetchMax, false),
+		actives:        rawToActives(activeList, c.activeFetchMax, false, courseID, classID),
 		timestamp:      now,
 		backoffCount:   0,
 		firstBackoffAt: time.Time{},
 	}
 	c.cacheMu.Unlock()
 
-	return rawToActives(activeList, c.activeFetchMax, false), nil
+	return rawToActives(activeList, c.activeFetchMax, false, courseID, classID), nil
 }
 
 func (c *Client) GetSignDetail(mobile, password string, activityID int64) (SignDetail, error) {

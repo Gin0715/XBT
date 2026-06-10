@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Activity, BookOpen, Zap } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Activity, BookOpen, Zap, AlertTriangle } from 'lucide-react';
 import type { ActivityItem } from '../hooks/useQuizMonitor';
 
 interface QuizListProps {
@@ -39,7 +39,21 @@ function QuizListInner({
     })
     .slice(0, showAll ? activities.length : 5);
 
-  if (!config.course_id) {
+  function formatCountdown(endTime: number, nowMs: number): string {
+    const diff = Math.max(0, endTime - nowMs);
+    const m = Math.floor(diff / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  function getCountdownColor(endTime: number, nowMs: number): string {
+    const diff = endTime - nowMs;
+    if (diff < 10000) return '#F53F3F'; // <10s red
+    if (diff < 30000) return '#FF7D00'; // <30s orange
+    return '#165DFF'; // normal blue
+  }
+
+  if (!config.course_id && !activities.length) {
     return (
       <div className="rounded-2xl p-6 text-center border" style={{ background: 'rgba(255,255,255,0.85)', borderColor: 'rgba(226,232,240,0.6)' }}>
         <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background: 'rgba(241,245,249,0.8)' }}>
@@ -98,14 +112,14 @@ function QuizListInner({
             )}
           </div>
           <p className="flex-1 text-sm font-semibold text-text-primary truncate">
-            {selectedCourse?.name || '未选择课程'}
+            {selectedCourse?.name || (config.course_id ? '已选课程' : '全部课程')}
           </p>
           <button onClick={onShowSettings} className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg" style={{ color: '#165DFF', background: 'rgba(22,93,255,0.08)' }}>
-            切换
+            设置
           </button>
         </div>
 
-        {/* 展开/收起 */}
+        {/* Expand/collapse */}
         {!showAll && sorted.length > 5 && (
           <button onClick={() => setShowAll(true)}
             className="w-full py-2.5 text-xs font-semibold transition-all hover:bg-slate-50/80"
@@ -113,8 +127,8 @@ function QuizListInner({
             展开全部 ({activities.length})
           </button>
         )}
+
         {/* Empty state */}
-        
         {activities.length === 0 ? (
           <div className="py-16 flex flex-col items-center">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 border" style={{ background: 'rgba(241,245,249,0.8)', borderColor: 'rgba(226,232,240,0.4)' }}>
@@ -143,50 +157,137 @@ function QuizListInner({
 
             const statusColor = isPending ? '#FF7D00' : isSuccess ? '#00B42A' : isFailed ? '#F53F3F' : isActive ? '#165DFF' : isWaiting ? '#94A3B8' : '#94A3B8';
 
+            // Countdown display for active items
+            const showCountdown = isActive && !isAnswered && endTime > 0;
+            const countdownColor = showCountdown ? getCountdownColor(endTime, now) : statusColor;
+
             return (
-              <div key={actId} className={`px-4 py-3.5 flex items-center gap-3 border-b last:border-0 transition-all ${isPending ? 'bg-gradient-to-r from-amber-50/80 to-transparent' : isSuccess ? 'bg-gradient-to-r from-emerald-50/50 to-transparent' : isFailed ? 'bg-gradient-to-r from-rose-50/50 to-transparent' : isExpired ? 'opacity-50' : ''}`} style={{ borderColor: 'rgba(226,232,240,0.4)' }}>
-                {/* Dot */}
-                <div className="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm" style={{ backgroundColor: statusColor, animation: isPending || (isActive && !isAnswered && !isExpired) ? 'pulse-glow 2s infinite' : undefined }} />
+              <div key={actId} className={`px-4 py-3.5 flex items-center gap-3 border-b last:border-0 transition-all ${
+                isPending ? 'bg-gradient-to-r from-amber-50/80 to-transparent' :
+                isSuccess ? 'bg-gradient-to-r from-emerald-50/50 to-transparent' :
+                isFailed ? 'bg-gradient-to-r from-rose-50/50 to-transparent' :
+                isExpired ? 'opacity-50' : ''
+              }`} style={{ borderColor: 'rgba(226,232,240,0.4)' }}>
+                {/* Status dot */}
+                <div className="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm"
+                  style={{
+                    backgroundColor: statusColor,
+                    animation: isPending || (isActive && !isAnswered && !isExpired) ? 'pulse-glow 2s infinite' : undefined,
+                  }}
+                />
 
                 {/* Icon */}
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm" style={{ background: isPending ? 'rgba(255,125,0,0.1)' : isSuccess ? 'rgba(0,180,42,0.1)' : isFailed ? 'rgba(245,63,63,0.1)' : isActive ? 'rgba(22,93,255,0.08)' : 'rgba(148,163,184,0.1)', border: `1.5px solid ${isPending ? 'rgba(255,125,0,0.3)' : isSuccess ? 'rgba(0,180,42,0.3)' : isFailed ? 'rgba(245,63,63,0.3)' : isActive ? 'rgba(22,93,255,0.2)' : 'rgba(148,163,184,0.15)'}` }}>
-                  {isSuccess ? <CheckCircle className="w-4.5 h-4.5 text-success-500" /> : isFailed ? <XCircle className="w-4.5 h-4.5 text-error-500" /> : isActive ? <Zap className="w-4.5 h-4.5 text-brand-500" /> : <Clock className="w-4 h-4 text-slate-400" />}
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm"
+                  style={{
+                    background: isPending ? 'rgba(255,125,0,0.1)' : isSuccess ? 'rgba(0,180,42,0.1)' : isFailed ? 'rgba(245,63,63,0.1)' : isActive ? 'rgba(22,93,255,0.08)' : 'rgba(148,163,184,0.1)',
+                    border: `1.5px solid ${isPending ? 'rgba(255,125,0,0.3)' : isSuccess ? 'rgba(0,180,42,0.3)' : isFailed ? 'rgba(245,63,63,0.3)' : isActive ? 'rgba(22,93,255,0.2)' : 'rgba(148,163,184,0.15)'}`,
+                  }}>
+                  {isSuccess ? <CheckCircle className="w-4.5 h-4.5 text-success-500" /> :
+                   isFailed ? <XCircle className="w-4.5 h-4.5 text-error-500" /> :
+                   isActive ? <Zap className="w-4.5 h-4.5 text-brand-500" /> :
+                   <Clock className="w-4 h-4 text-slate-400" />}
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <p className="font-semibold text-sm text-text-primary truncate">{act.title || '抢答'}</p>
-                    {act.start_time ? <span className="text-[10px] text-text-muted font-mono">{new Date(act.start_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span> : null}
-                    {isAnswered && act._elapsed !== undefined && (
-                      <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(22,93,255,0.08)', color: '#165DFF' }}>{act._elapsed}ms</span>
-                    )}
-                    {isPending && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold animate-pulse" style={{ background: 'rgba(255,125,0,0.15)', color: '#c2410c' }}>⏳ 抢答中</span>}
-                    {isSuccess && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(0,180,42,0.15)', color: '#15803d' }}>✅ 成功</span>}
-                    {isFailed && (
-  <div className="flex items-center gap-1.5">
-    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(245,63,63,0.12)', color: '#dc2626' }}>❌ 失败</span>
-    {onRetry && act.course_id && (
-      <button onClick={(e) => { e.stopPropagation(); onRetry(Number(act.activity_id || act.id), act.course_id!, act.class_id || 0); }}
-        className="text-[10px] px-2 py-0.5 rounded-md font-bold transition-all active:scale-90"
-        style={{ background: 'rgba(22,93,255,0.1)', color: '#165DFF' }}>
-        重试
-      </button>
-    )}
-  </div>
-)}
-                    {isWaiting && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold animate-pulse" style={{ background: 'rgba(148,163,184,0.12)', color: '#64748b' }}>⏳ 待开始</span>}
-                    {!isAnswered && isExpired && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-slate-100 text-slate-500">已结束</span>}
+                    {act.start_time ? (
+                      <span className="text-[10px] text-text-muted font-mono">
+                        {new Date(act.start_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    ) : null}
                   </div>
+
+                  {/* Second line: status + countdown + elapsed */}
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                    {act.course_name && <span className="text-[10px] text-text-muted font-medium">📚 {act.course_name}</span>}
+                    {act.course_name && (
+                      <span className="text-[10px] text-text-muted font-medium">📚 {act.course_name}</span>
+                    )}
+
+                    {/* 进行中 + 倒计时 */}
                     {isActive && !isAnswered && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: endTime > 0 ? 'rgba(255,125,0,0.12)' : 'rgba(22,93,255,0.12)', color: endTime > 0 ? '#c2410c' : '#165DFF' }}>
-                        {endTime > 0 ? `⏳ ${formatCountdown(endTime, now)}` : '⏳ 进行中'}
+                      <>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(22,93,255,0.12)', color: '#165DFF' }}>
+                          ⏳ 进行中
+                        </span>
+                        {showCountdown && (
+                          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md" style={{ background: `${countdownColor}15`, color: countdownColor }}>
+                            剩余 {formatCountdown(endTime, now)}
+                          </span>
+                        )}
+                        {!showCountdown && (
+                          <span className="text-[10px] animate-pulse" style={{ color: '#165DFF' }}>
+                            等待教师开启...
+                          </span>
+                        )}
+                      </>
+                    )}
+
+                    {/* 等待开始 */}
+                    {isWaiting && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold animate-pulse" style={{ background: 'rgba(148,163,184,0.12)', color: '#64748b' }}>
+                        ⏳ 待开始
                       </span>
                     )}
-                    {act._answerMsg && isFailed && <span className="text-[10px] truncate max-w-[160px]" style={{ color: '#dc2626', opacity: 0.8 }}>{act._answerMsg}</span>}
+
+                    {/* 抢答成功 + 耗时 */}
+                    {isSuccess && (
+                      <>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(0,180,42,0.15)', color: '#15803d' }}>
+                          ✅ 抢答成功
+                        </span>
+                        {act._elapsed !== undefined && act._elapsed > 0 && (
+                          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md" style={{ background: 'rgba(0,180,42,0.1)', color: '#15803d' }}>
+                            耗时 {act._elapsed}ms
+                          </span>
+                        )}
+                      </>
+                    )}
+
+                    {/* 抢答失败 */}
+                    {isFailed && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(245,63,63,0.12)', color: '#dc2626' }}>
+                          ❌ 抢答失败
+                        </span>
+                        {act._elapsed !== undefined && act._elapsed > 0 && (
+                          <span className="text-[10px] font-bold" style={{ color: '#dc2626' }}>
+                            {act._elapsed}ms
+                          </span>
+                        )}
+                        {onRetry && act.course_id && (
+                          <button onClick={(e) => { e.stopPropagation(); onRetry(Number(act.activity_id || act.id), act.course_id!, act.class_id || 0); }}
+                            className="text-[10px] px-2 py-0.5 rounded-md font-bold transition-all active:scale-90"
+                            style={{ background: 'rgba(22,93,255,0.1)', color: '#165DFF' }}>
+                            重试
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 已结束 */}
+                    {!isAnswered && isExpired && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-slate-100 text-slate-500">
+                        已结束
+                      </span>
+                    )}
+
+                    {/* 抢答中的等待动画 */}
+                    {isPending && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold animate-pulse" style={{ background: 'rgba(255,125,0,0.15)', color: '#c2410c' }}>
+                        ⏳ 抢答中
+                      </span>
+                    )}
                   </div>
+
+                  {/* Failure message */}
+                  {act._answerMsg && isFailed && (
+                    <div className="mt-1 text-[10px] truncate max-w-[200px]" style={{ color: '#dc2626', opacity: 0.8 }}>
+                      <AlertTriangle className="w-3 h-3 inline mr-0.5" />
+                      {act._answerMsg}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -195,13 +296,6 @@ function QuizListInner({
       </div>
     </div>
   );
-}
-
-function formatCountdown(endTime: number, now: number): string {
-  const diff = Math.max(0, endTime - now);
-  const m = Math.floor(diff / 60000);
-  const s = Math.floor((diff % 60000) / 1000);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 export const QuizList = memo(QuizListInner);

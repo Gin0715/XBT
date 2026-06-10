@@ -33,7 +33,7 @@ func main() {
 	}
 
 	// 自动迁移抢答功能相关数据库表
-	if err := database.AutoMigrate(&quizmodel.QuizConfig{}, &quizmodel.QuizRecord{}, &quizmodel.QuizActivity{}); err != nil {
+	if err := database.AutoMigrate(&quizmodel.QuizConfig{}, &quizmodel.QuizRecord{}, &quizmodel.QuizActivity{}, &quizmodel.QuizLog{}); err != nil {
 		log.Printf("quiz auto migrate failed: %v", err)
 	}
 
@@ -119,7 +119,9 @@ func main() {
 			authed.POST("/quiz/monitor/start", quizHandler.StartMonitor)         // 兼容旧版
 			authed.POST("/quiz/monitor/stop", quizHandler.StopMonitor)           // 兼容旧版
 			authed.GET("/quiz/events", quizHandler.Events)                      // SSE 实时事件推送
-			authed.GET("/quiz/ws", quizHandler.WS)                             // WebSocket 实时推送
+			authed.GET("/quiz/ws", quizHandler.WS)
+			authed.GET("/quiz/logs", quizHandler.GetLogs)
+			authed.DELETE("/quiz/logs", quizHandler.ClearLogs)                             // WebSocket 实时推送
 
 			admin := authed.Group("/admin")
 			admin.Use(middleware.AdminOnly())

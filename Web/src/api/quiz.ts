@@ -121,3 +121,28 @@ export const oneClickAnswer = () => {
 export const clearQuizRecords = () => {
   return client.delete('/quiz/records');
 };
+
+// ================= 抢答日志 =================
+
+export interface QuizLogItem {
+  id: number;
+  user_uid: number;
+  activity_id: number;
+  type: string;       // answer / detect / warning / retry
+  status: string;     // success / failed / pending
+  message: string;
+  elapsed_ms: number;
+  course_name: string;
+  activity_name: string;
+  created_at: string;
+}
+
+// 获取抢答日志
+export const getQuizLogs = () => {
+  return client.get<QuizLogItem[]>('/quiz/logs');
+};
+
+// 清空抢答日志
+export const clearQuizLogs = () => {
+  return client.delete('/quiz/logs');
+};

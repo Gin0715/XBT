@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,7 +14,6 @@ import (
 	mainmodel "xbt2/server/internal/model"
 	"xbt2/server/internal/quiz/model"
 	svc "xbt2/server/internal/service"
-	"context"
 	"xbt2/server/internal/xxt"
 )
 
@@ -39,6 +41,12 @@ const (
 
 type subscriber struct {
 	ch chan MonitorEvent
+}
+
+// CoursePair 课程-班级对
+type CoursePair struct {
+	CourseID int64 `json:"course_id"`
+	ClassID  int64 `json:"class_id"`
 }
 
 // ================= 核心服务 =================
@@ -77,6 +85,7 @@ type UserContext struct {
 	backoffUntil        time.Time
 	pausedUntil         time.Time
 	consecutiveFailures int
+	sessionCheckedAt    time.Time // 上次 session 有效性检查时间（防重复检查）
 }
 
 // AnswerResult 一键抢答结果
@@ -213,6 +222,11 @@ func (s *QuizService) executeAnswer(cctx context.Context, userCtx *UserContext, 
 		time.Sleep(time.Duration(delayMs+jitter) * time.Millisecond)
 	}
 
+	// 执行抢答前检查 session 有效性，过期自动续期
+	if !s.ensureSessionValid(userUID, userCtx) {
+		return nil, fmt.Errorf("登录凭证已失效，无法执行抢答")
+	}
+
 	var lastResult *AnswerResult
 	maxRetries := 2
 
@@ -324,7 +338,7 @@ func (s *QuizService) executeAnswer(cctx context.Context, userCtx *UserContext, 
 	return nil, fmt.Errorf("抢答请求失败（多次重试后仍无法提交）")
 }
 
-// ================= 风控处理 =================
+// ================= 风控处理 + Session 续期 =================
 
 func (s *QuizService) handleAntiCrawl(userCtx *UserContext, response string) {
 	userCtx.consecutiveFailures++
@@ -349,8 +363,84 @@ func (s *QuizService) handleAntiCrawl(userCtx *UserContext, response string) {
 		log.Printf("[Quiz] 🛑 风控降温 10s: consecutive=%d", userCtx.consecutiveFailures)
 	}
 
+	// 检测会话过期：HTML 响应表示超星侧 session 已失效
+	if strings.HasPrefix(response, "<") || strings.Contains(response, "<!DOCTYPE") {
+		log.Printf("[Quiz] 🔄 Session已过期，重置: mobile=%s", maskMobile(userCtx.cachedMobile))
+		s.xxtClient.ResetSession(userCtx.cachedMobile)
+		userCtx.sessionCheckedAt = time.Time{} // 下次检查时重新登录
+	}
+
 	// 风控后清空活动缓存，下次请求强制刷新
 	s.xxtClient.ResetQuizCache(0, 0)
+}
+
+// isSessionValid 检查用户 session 是否有效
+// 通过 GetPanUploadToken 做一次低开销 API 调用验证 cookie 是否仍然有效
+// 返回 true=有效，false=需要重新登录
+func (s *QuizService) isSessionValid(userCtx *UserContext) bool {
+	if userCtx == nil || userCtx.cachedMobile == "" || userCtx.cachedPassword == "" {
+		return false
+	}
+	_, err := s.xxtClient.GetPanUploadToken(userCtx.cachedMobile, userCtx.cachedPassword)
+	if err != nil {
+		// token missing / login 相关错误表示 session 失效
+		errStr := err.Error()
+		if strings.Contains(errStr, "token missing") || strings.Contains(errStr, "login") {
+			return false
+		}
+		// 其他网络错误不判定为 session 失效（可能是临时故障）
+		return true
+	}
+	return true
+}
+
+// refreshSession 强制刷新用户 session（重新登录）
+// 最多重试 maxRetry 次，成功后更新 xxt client 的 session 缓存
+// 连续失败 3 次后推送 "登录失效" 事件
+func (s *QuizService) refreshSession(userUID int64, userCtx *UserContext) bool {
+	const maxRetry = 3
+	for i := 0; i < maxRetry; i++ {
+		_, err := s.xxtClient.PreLogin(userCtx.cachedMobile, userCtx.cachedPassword)
+		if err == nil {
+			userCtx.sessionCheckedAt = time.Now()
+			log.Printf("[Quiz] ✅ Session续期成功: uid=%d attempt=%d", userUID, i+1)
+			return true
+		}
+		log.Printf("[Quiz] ⚠ Session续期失败(%d/%d): uid=%d err=%v", i+1, maxRetry, userUID, err)
+		if i < maxRetry-1 {
+			time.Sleep(time.Duration(500*(i+1)) * time.Millisecond) // 500ms → 1000ms 退避
+		}
+	}
+
+	// 连续失败，推送登录失效事件
+	log.Printf("[Quiz] ❌ Session续期彻底失败: uid=%d", userUID)
+	s.broadcast(userUID, MonitorEvent{
+		Type:    EventWarning,
+		Success: false,
+		Message: "登录凭证已失效，请重新登录",
+	})
+	return false
+}
+
+// ensureSessionValid 在 executeAnswer 前调用，确保 session 有效
+// 每 sessionCheckInterval（5分钟）检查一次，过期时自动续期
+const sessionCheckInterval = 5 * time.Minute
+
+func (s *QuizService) ensureSessionValid(userUID int64, userCtx *UserContext) bool {
+	if userCtx == nil {
+		return false
+	}
+	// 上次检查在有效期内 → 跳过
+	if !userCtx.sessionCheckedAt.IsZero() && time.Since(userCtx.sessionCheckedAt) < sessionCheckInterval {
+		return true
+	}
+	// 需要检查
+	if s.isSessionValid(userCtx) {
+		userCtx.sessionCheckedAt = time.Now()
+		return true
+	}
+	// session 已过期，尝试续期
+	return s.refreshSession(userUID, userCtx)
 }
 
 // ================= 用户上下文管理 =================
@@ -585,6 +675,27 @@ func (s *QuizService) saveRecord(userUID, activityID int64, success bool, msg st
 		Message:    msg,
 	}
 	s.db.Create(rec)
+
+	// 同步写入操作日志
+	status := "failed"
+	if success {
+		status = "success"
+	}
+	s.saveLog(userUID, &model.QuizLog{
+		ActivityID: activityID,
+		Type:       "answer",
+		Status:     status,
+		Message:    msg,
+	})
+}
+
+// saveLog 写入抢答操作日志
+func (s *QuizService) saveLog(userUID int64, logEntry *model.QuizLog) {
+	if logEntry == nil {
+		return
+	}
+	logEntry.UserUID = userUID
+	s.db.Create(logEntry)
 }
 
 // saveActivity 保存抢答活动到数据库（供活动列表展示）
@@ -876,12 +987,14 @@ func (qm *QuizMonitor) StartPreWarm(userUID int64, mobile, password string, cour
 	// 全新启动预热
 	ctx, cancel := context.WithCancel(context.Background())
 	qm.users[userUID] = &userMonitorState{
+		ctx:      ctx,
 		cancel:   cancel,
 		mode:     MonitorPreWarm,
 		mobile:   mobile,
 		password: password,
 		courseID: courseID,
 		classID:  classID,
+		cache:    &ActivityCache{},
 	}
 	qm.mu.Unlock()
 	go qm.preWarmLoop(ctx, userUID, mobile, password, courseID, classID)
@@ -912,49 +1025,215 @@ func (qm *QuizMonitor) StartPreWarmFromDB(userUID int64, courseID, classID int64
 	qm.StartPreWarm(userUID, userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID)
 }
 
-// OneClickAnswer 一键抢答：检测进行中的抢答活动 → 异步执行抢答
-// 返回检测到的活动数量（同步返回，抢答结果通过 WS 推送）
-// 缓存优先：预热已缓存的活动列表可直接读取（毫秒级响应）
-// 缓存为空时自动降级为强制刷新
-func (qm *QuizMonitor) OneClickAnswer(userUID int64, mobile, password string, courseID, classID int64) (int, error) {
-	qm.StartPreWarm(userUID, mobile, password, courseID, classID)
-
-	// 同步检测当前活动（缓存优先，空时自动强制刷新）
-	detected := qm.detectActivities(userUID, mobile, password, courseID, classID)
-	if len(detected) == 0 {
-		return 0, nil
+// parseCourseIDs 解析 QuizConfig.CourseIDs JSON 字符串为课程列表
+func parseCourseIDs(jsonStr string) []CoursePair {
+	if jsonStr == "" {
+		return nil
 	}
-
-	// 异步执行抢答（结果通过 WS 推送）
-	go qm.answerActivities(userUID, mobile, password, courseID, classID, detected)
-	return len(detected), nil
+	var pairs []CoursePair
+	if err := json.Unmarshal([]byte(jsonStr), &pairs); err != nil || len(pairs) == 0 {
+		return nil
+	}
+	// 去重
+	seen := make(map[string]bool)
+	var result []CoursePair
+	for _, p := range pairs {
+		key := fmt.Sprintf("%d:%d", p.CourseID, p.ClassID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, p)
+	}
+	return result
 }
 
-// detectActivities 检测当前进行中的抢答活动
-// 策略：先读缓存（预热保持的）→ 有结果直接返回（毫秒级）
-//       缓存为空或无结果 → 强制刷新（绕过退避）→ 再试一次
-func (qm *QuizMonitor) detectActivities(userUID int64, mobile, password string, courseID, classID int64) []xxt.Active {
-	// 第一优先：从缓存读取（预热已保持最新）
-	actives, err := qm.xxtCli.GetActivesAllFast(mobile, password, courseID, classID)
-	if err != nil || len(actives) == 0 {
-		// 缓存为空 → 强制刷新（绕过风控退避）
-		actives, err = qm.xxtCli.GetActivesAllForce(mobile, password, courseID, classID)
-		if err != nil || len(actives) == 0 {
-			return nil
+// getConfigCourses 从配置中获取要监控的课程列表
+// 优先级: CourseIDs(多课程) > CourseID/ClassID(单课程兼容)
+func (s *QuizService) getConfigCourses(userUID int64) []CoursePair {
+	cfg, err := s.GetConfig(userUID)
+	if err != nil || cfg == nil {
+		return nil
+	}
+
+	// 优先使用 CourseIDs（多课程模式）
+	if pairs := parseCourseIDs(cfg.CourseIDs); len(pairs) > 0 {
+		return pairs
+	}
+
+	// 降级到单课程模式（向后兼容）
+	if cfg.CourseID > 0 {
+		return []CoursePair{{CourseID: cfg.CourseID, ClassID: cfg.ClassID}}
+	}
+
+	return nil
+}
+
+// OneClickAnswer 一键抢答：检测进行中的抢答活动 → 异步执行抢答
+// v2 支持多课程：
+//   - 如果配置了 CourseIDs → 遍历所有选中课程分别检测并合并结果
+//   - 如果仅配置了 CourseID/ClassID → 单课程模式（向后兼容）
+//   - 如果未配置任何课程 → 从超星拉取所有课程并检测全部
+// 返回检测到的活动总数（同步返回，抢答结果通过 WS 推送）
+func (qm *QuizMonitor) OneClickAnswer(userUID int64, mobile, password string, configCourseID, configClassID int64) (int, error) {
+	qm.StartPreWarm(userUID, mobile, password, configCourseID, configClassID)
+
+	// 获取课程列表（多课程优先）
+	courses := qm.svc.getConfigCourses(userUID)
+
+	// 如果配置中没有课程，从超星拉取全部课程
+	if len(courses) == 0 {
+		allCourses, err := qm.xxtCli.GetCourses(mobile, password)
+		if err == nil && len(allCourses) > 0 {
+			for _, c := range allCourses {
+				courses = append(courses, CoursePair{CourseID: c.CourseID, ClassID: c.ClassID})
+			}
+			log.Printf("[QuizMonitor] 📚 未指定课程，自动检测全部: uid=%d courses=%d", userUID, len(courses))
 		}
 	}
 
+	if len(courses) == 0 {
+		// 兜底：用传入的 courseID（可能是0）
+		courses = []CoursePair{{CourseID: configCourseID, ClassID: configClassID}}
+	}
+
+	// 遍历所有课程，检测活动并去重
+	allDetected := make([]xxt.Active, 0)
+	seenIDs := make(map[int64]bool)
+
+	for _, cp := range courses {
+		detected := qm.detectActivities(userUID, mobile, password, cp.CourseID, cp.ClassID)
+		for _, act := range detected {
+			if !seenIDs[act.ActiveID] {
+				seenIDs[act.ActiveID] = true
+				// 确保活动有正确的课程信息
+				if act.CourseID == 0 {
+					act.CourseID = cp.CourseID
+					act.ClassID = cp.ClassID
+				}
+				allDetected = append(allDetected, act)
+			}
+		}
+	}
+
+	if len(allDetected) == 0 {
+		log.Printf("[QuizMonitor] ⚠ 未检测到任何进行中的抢答活动: uid=%d courses=%d", userUID, len(courses))
+		return 0, nil
+	}
+
+	log.Printf("[QuizMonitor] 🎯 一键抢答: uid=%d courses=%d detected=%d", userUID, len(courses), len(allDetected))
+
+	// 异步执行抢答（结果通过 WS 推送）
+	go qm.answerActivities(userUID, mobile, password, 0, 0, allDetected)
+	return len(allDetected), nil
+}
+
+// getCachedActivities 读取原始缓存数据（不做过滤，用于 fallback 和增量 diff）
+func (qm *QuizMonitor) getCachedActivities(userUID int64) []xxt.Active {
+	qm.mu.Lock()
+	state, exists := qm.users[userUID]
+	qm.mu.Unlock()
+	if !exists {
+		return nil
+	}
+
+	state.cacheMu.Lock()
+	defer state.cacheMu.Unlock()
+	if state.cache == nil {
+		return nil
+	}
+	// 即使缓存过期也返回数据，作为实时拉取失败的兜底
+	return state.cache.Activities
+}
+
+// updateUserCache 更新用户的活动缓存
+func (qm *QuizMonitor) updateUserCache(userUID int64, activities []xxt.Active) {
+	qm.mu.Lock()
+	if state, exists := qm.users[userUID]; exists {
+		state.cacheMu.Lock()
+		if state.cache == nil {
+			state.cache = &ActivityCache{}
+		}
+		state.cache.Update(activities, cacheTTL)
+		state.cacheMu.Unlock()
+	}
+	qm.mu.Unlock()
+}
+
+// getUserContext 获取用户专属 context（WS 断开时自动取消）
+// 用于传递到异步抢答任务，确保用户断开后 goroutine 能及时退出
+func (qm *QuizMonitor) getUserContext(userUID int64) context.Context {
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+	if state, exists := qm.users[userUID]; exists && state.ctx != nil {
+		return state.ctx
+	}
+	return context.Background()
+}
+
+// detectActivities 检测当前进行中的抢答活动
+// v2 重写：每次调用都强制实时拉取，缓存仅用于兜底和增量检测
+// 核心修复：预览仅依赖缓存导致新活动最长 60s 才被检测到的 BUG
+//
+// 策略（三级保障，层层兜底）:
+//   1. GetActivesAllFast —— 始终做实时网络请求（xxt 内部 200ms 缓存，一定能拿到最新数据）
+//   2. 快速拉取失败 → GetActivesAllForce —— 绕过风控退避强制拉取
+//   3. 强制拉取也失败 → 过期缓存数据兜底 —— 绝不返回空列表（除非真没数据）
+func (qm *QuizMonitor) detectActivities(userUID int64, mobile, password string, courseID, classID int64) []xxt.Active {
+	// Step 0：保存缓存快照，用于增量检测和兜底
+	cachedActives := qm.getCachedActivities(userUID)
+	cachedIDs := make(map[int64]bool, len(cachedActives))
+	for _, a := range cachedActives {
+		cachedIDs[a.ActiveID] = true
+	}
+
+	// Step 1：始终执行实时拉取（核心修复——每次点击都走网络请求）
+	freshActives, err := qm.xxtCli.GetActivesAllFast(mobile, password, courseID, classID)
+	if err != nil || len(freshActives) == 0 {
+		// Step 2：快速拉取失败 → 强制刷新（绕过风控退避）
+		freshActives, err = qm.xxtCli.GetActivesAllForce(mobile, password, courseID, classID)
+	}
+
+	// Step 3：合并数据源——实时数据优先，实时为空则降级到缓存（即使过期）
+	mergeSource := freshActives
+	if len(mergeSource) == 0 {
+		mergeSource = cachedActives
+	}
+	if len(mergeSource) == 0 {
+		log.Printf("[QuizMonitor] ⚠ 无任何活动数据: uid=%d", userUID)
+		return nil // 真没有数据
+	}
+
+	// 更新缓存（用最新数据刷新，供后续 diff 和预热使用）
+	qm.updateUserCache(userUID, mergeSource)
+
+	// Step 4：增量检测——缓存中没有但实时拉取返回的活动即为新活动
+	if len(freshActives) > 0 {
+		var newCount int
+		for _, a := range freshActives {
+			if !cachedIDs[a.ActiveID] {
+				newCount++
+				log.Printf("[QuizMonitor] 🆕 检测到新活动: uid=%d active=%d name=%s", userUID, a.ActiveID, a.Name)
+			}
+		}
+		if newCount > 0 {
+			log.Printf("[QuizMonitor] 📊 增量汇总: uid=%d 新活动=%d 缓存=%d 实时=%d",
+				userUID, newCount, len(cachedActives), len(freshActives))
+		}
+	}
+
+	// Step 5：过滤——已处理的活动不重复返回
 	seen := make(map[int64]bool)
-	records, err := qm.svc.GetUserActivityIDs(userUID)
-	if err == nil {
+	if records, err := qm.svc.GetUserActivityIDs(userUID); err == nil {
 		for _, id := range records {
 			seen[id] = true
 		}
 	}
 
+	// Step 6：筛选进行中的抢答活动
 	var detected []xxt.Active
 	now := time.Now().UnixMilli()
-	for _, act := range actives {
+	for _, act := range mergeSource {
 		if !xxt.IsQuizActivity(act.Name) && !xxt.IsQuizActivityByType(act.ActiveType) {
 			continue
 		}
@@ -967,40 +1246,44 @@ func (qm *QuizMonitor) detectActivities(userUID int64, mobile, password string, 
 		if seen[act.ActiveID] {
 			continue
 		}
+		// 如指定了单门课程 → 只返回该课程的活动
+		if courseID > 0 && act.CourseID > 0 && act.CourseID != courseID {
+			continue
+		}
 		detected = append(detected, act)
 	}
 
-	// 如果缓存有数据但没检测到有效活动，尝试强制刷新一次（防止缓存过期）
-	if len(detected) == 0 {
-		forceActives, forceErr := qm.xxtCli.GetActivesAllForce(mobile, password, courseID, classID)
-		if forceErr == nil && len(forceActives) > 0 {
-			now = time.Now().UnixMilli()
-			for _, act := range forceActives {
-				if !xxt.IsQuizActivity(act.Name) && !xxt.IsQuizActivityByType(act.ActiveType) {
-					continue
-				}
-				if act.Status != 1 {
-					continue
-				}
-				if act.EndTime > 0 && now >= act.EndTime {
-					continue
-				}
-				if seen[act.ActiveID] {
-					continue
-				}
-				detected = append(detected, act)
-			}
-		}
-	}
-
+	log.Printf("[QuizMonitor] 🎯 检测完成: uid=%d detected=%d total=%d source=%s",
+		userUID, len(detected), len(mergeSource),
+		map[bool]string{true: "fresh", false: "cache"}[len(freshActives) > 0])
 	return detected
 }
 
 // answerActivities 异步执行抢答（结果通过 WS 推送）
-func (qm *QuizMonitor) answerActivities(userUID int64, _, _ string, courseID, classID int64, detected []xxt.Active) {
+// 使用用户专属 context，WS 断开时自动取消未完成的抢答任务
+func (qm *QuizMonitor) answerActivities(userUID int64, _, _ string, defaultCourseID, defaultClassID int64, detected []xxt.Active) {
+	// 获取用户专属 context（WS 断开时自动 cancel）
+	userCtx := qm.getUserContext(userUID)
+
 	for _, act := range detected {
+		// 检查 context 是否已取消（用户已断开连接）
+		select {
+		case <-userCtx.Done():
+			log.Printf("[QuizMonitor] ⏰ 用户已断开，停止抢答: uid=%d active=%d", userUID, act.ActiveID)
+			return
+		default:
+		}
+
+		// 使用活动自身携带的课程信息（支持多课程）
+		actCourseID := act.CourseID
+		actClassID := act.ClassID
+		if actCourseID == 0 {
+			actCourseID = defaultCourseID
+			actClassID = defaultClassID
+		}
+
 		// 保存活动到数据库（供活动列表展示）
-		qm.svc.saveActivity(userUID, courseID, classID, act)
+		qm.svc.saveActivity(userUID, actCourseID, actClassID, act)
 
 		log.Printf("[QuizMonitor] 检测到活动并抢答: uid=%d active=%d name=%s", userUID, act.ActiveID, act.Name)
 		BroadcastQuizActivity(userUID, MonitorEvent{
@@ -1010,8 +1293,16 @@ func (qm *QuizMonitor) answerActivities(userUID int64, _, _ string, courseID, cl
 			Success:    false,
 			Message:    "检测到抢答活动",
 		})
+			qm.svc.saveLog(userUID, &model.QuizLog{
+				ActivityID:   act.ActiveID,
+				Type:         "detect",
+				Status:       "pending",
+				Message:      "检测到抢答活动",
+				ActivityName: act.Name,
+			})
 
-		result, err := qm.svc.ManualQuickAnswer(context.Background(), userUID, act.ActiveID, courseID, classID)
+		// 使用用户 context 替代 context.Background()，支持断线取消
+		result, err := qm.svc.ManualQuickAnswer(userCtx, userUID, act.ActiveID, actCourseID, actClassID)
 		if err != nil {
 			log.Printf("[QuizMonitor] 抢答失败: uid=%d active=%d err=%v", userUID, act.ActiveID, err)
 		} else {

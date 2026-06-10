@@ -182,6 +182,29 @@ func (h *QuizHandler) ClearRecords(c *gin.Context) {
 	success(c, gin.H{"message": "已清空抢答记录"})
 }
 
+// ================= 日志管理 =================
+
+func (h *QuizHandler) GetLogs(c *gin.Context) {
+	uid := getUserUID(c)
+	if uid == 0 {
+		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+		return
+	}
+	var logs []model.QuizLog
+	h.db.Where("user_uid = ?", uid).Order("created_at desc").Limit(100).Find(&logs)
+	success(c, logs)
+}
+
+func (h *QuizHandler) ClearLogs(c *gin.Context) {
+	uid := getUserUID(c)
+	if uid == 0 {
+		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+		return
+	}
+	h.db.Where("user_uid = ?", uid).Delete(&model.QuizLog{})
+	success(c, gin.H{"message": "已清空抢答日志"})
+}
+
 // ================= SSE 实时事件推送 =================
 
 func (h *QuizHandler) Events(c *gin.Context) {
