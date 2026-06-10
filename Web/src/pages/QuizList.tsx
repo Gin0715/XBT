@@ -5,8 +5,9 @@ import type { ActivityItem } from '../hooks/useQuizMonitor';
 interface QuizListProps {
   activities: ActivityItem[];
   config: { course_id?: number };
-  selectedCourse: { name?: string; icon?: string } | null;
+  selectedCourse: { name?: string; icon?: string; course_id?: number; class_id?: number } | null;
   onShowSettings: () => void;
+  onRetry?: (activityId: number, courseId: number, classId: number) => void;
 }
 
 function QuizListInner({
@@ -14,7 +15,9 @@ function QuizListInner({
   config,
   selectedCourse,
   onShowSettings,
+  onRetry,
 }: QuizListProps) {
+  const [showAll, setShowAll] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -34,7 +37,7 @@ function QuizListInner({
       if (aActive !== bActive) return aActive ? -1 : 1;
       return bEnd - aEnd;
     })
-    .slice(0, 5);
+    .slice(0, showAll ? activities.length : 5);
 
   if (!config.course_id) {
     return (
@@ -67,7 +70,7 @@ function QuizListInner({
           <h3 className="font-semibold text-sm text-text-primary">抢答活动</h3>
           {activities.length > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(22,93,255,0.08)', color: '#165DFF' }}>
-              {Math.min(activities.length, 5)}/{activities.length}
+              {showAll ? activities.length : Math.min(activities.length, 5)}/{activities.length}
             </span>
           )}
         </div>
@@ -80,7 +83,16 @@ function QuizListInner({
         <div className="mx-3 mt-3 p-3 flex items-center gap-2.5 rounded-xl border" style={{ background: 'rgba(248,250,252,0.8)', borderColor: 'rgba(226,232,240,0.4)' }}>
           <div className="w-8 h-8 rounded-xl flex items-center justify-center overflow-hidden" style={{ background: 'linear-gradient(135deg, #eff4ff, #dbe8fe)' }}>
             {selectedCourse?.icon ? (
-              <img src={selectedCourse.icon} alt="" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              <img src={selectedCourse.icon} referrerPolicy="no-referrer" alt=""
+                className="w-full h-full object-cover"
+                onError={e => {
+                  const target = e.target as HTMLImageElement;
+                  if (!target.dataset.fallback) {
+                    target.dataset.fallback = '1';
+                    target.src = `/api/courses/icon?course_id=${selectedCourse.course_id}&class_id=${selectedCourse.class_id}`;
+                  }
+                }}
+              />
             ) : (
               <BookOpen className="w-3.5 h-3.5 text-brand-600" />
             )}
@@ -93,7 +105,16 @@ function QuizListInner({
           </button>
         </div>
 
+        {/* 展开/收起 */}
+        {!showAll && sorted.length > 5 && (
+          <button onClick={() => setShowAll(true)}
+            className="w-full py-2.5 text-xs font-semibold transition-all hover:bg-slate-50/80"
+            style={{ color: '#165DFF', borderTop: '1px solid rgba(226,232,240,0.4)', borderBottom: '1px solid rgba(226,232,240,0.2)' }}>
+            展开全部 ({activities.length})
+          </button>
+        )}
         {/* Empty state */}
+        
         {activities.length === 0 ? (
           <div className="py-16 flex flex-col items-center">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 border" style={{ background: 'rgba(241,245,249,0.8)', borderColor: 'rgba(226,232,240,0.4)' }}>
@@ -142,7 +163,18 @@ function QuizListInner({
                     )}
                     {isPending && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold animate-pulse" style={{ background: 'rgba(255,125,0,0.15)', color: '#c2410c' }}>⏳ 抢答中</span>}
                     {isSuccess && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(0,180,42,0.15)', color: '#15803d' }}>✅ 成功</span>}
-                    {isFailed && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(245,63,63,0.12)', color: '#dc2626' }}>❌ 失败</span>}
+                    {isFailed && (
+  <div className="flex items-center gap-1.5">
+    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold" style={{ background: 'rgba(245,63,63,0.12)', color: '#dc2626' }}>❌ 失败</span>
+    {onRetry && act.course_id && (
+      <button onClick={(e) => { e.stopPropagation(); onRetry(Number(act.activity_id || act.id), act.course_id!, act.class_id || 0); }}
+        className="text-[10px] px-2 py-0.5 rounded-md font-bold transition-all active:scale-90"
+        style={{ background: 'rgba(22,93,255,0.1)', color: '#165DFF' }}>
+        重试
+      </button>
+    )}
+  </div>
+)}
                     {isWaiting && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold animate-pulse" style={{ background: 'rgba(148,163,184,0.12)', color: '#64748b' }}>⏳ 待开始</span>}
                     {!isAnswered && isExpired && <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-slate-100 text-slate-500">已结束</span>}
                   </div>

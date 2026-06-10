@@ -30,14 +30,17 @@ export interface ActivityItem {
   title?: string;
   name?: string;
   course_name?: string;
+  teacher?: string;
+  icon?: string;
   start_time?: number;
   end_time?: number;
   status?: number;
+  class_id?: number;
+  course_id?: number;
   _answerStatus?: 'pending' | 'success' | 'failed';
   _answerMsg?: string;
   _elapsed?: number;
   created_at?: string;
-  course_id?: number;
 }
 
 interface QuizState {
@@ -51,6 +54,7 @@ interface QuizState {
   error: string | null;
   loading: Record<string, boolean>;
   stats: { success: number; fail: number };
+  isWSConnected: boolean;
 }
 
 type QuizAction =
@@ -67,6 +71,7 @@ type QuizAction =
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_LOADING'; payload: Record<string, boolean> }
   | { type: 'SET_STATS'; payload: { success: number; fail: number } }
+  | { type: 'SET_WS_CONNECTED'; payload: boolean }
   | { type: 'CLEAR_ALL' };
 
 const DEFAULT_CONFIG: QuizConfig = {
@@ -88,6 +93,7 @@ const initialQuizState: QuizState = {
   error: null,
   loading: {},
   stats: { success: 0, fail: 0 },
+  isWSConnected: false,
 };
 
 // ================= Reducer =================
@@ -134,8 +140,10 @@ function quizReducer(state: QuizState, action: QuizAction): QuizState {
       return { ...state, loading: { ...state.loading, ...action.payload } };
     case 'SET_STATS':
       return { ...state, stats: action.payload };
+    case 'SET_WS_CONNECTED':
+      return { ...state, isWSConnected: action.payload };
     case 'CLEAR_ALL':
-      return { ...initialQuizState, config: state.config, courses: state.courses, selectedCourse: state.selectedCourse };
+      return { ...initialQuizState, config: state.config, courses: state.courses, selectedCourse: state.selectedCourse, isWSConnected: state.isWSConnected };
     default:
       return state;
   }
@@ -173,6 +181,7 @@ export function useQuizMonitor() {
   const [state, dispatch] = useReducer(quizReducer, initialQuizState);
   const stateRef = useRef(state);
   const wsRef = useRef<WebSocket | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -271,11 +280,16 @@ export function useQuizMonitor() {
     } catch { /* ignore */ }
   }, [isAuthenticated, token]);
 
-  // 每 5s 刷新状态（保持活动列表最新）
+  // 自适应轮询（已弃用固定 5s，改用 pollStatus 内部重新调度）
   useEffect(() => {
     if (!isAuthenticated || !token) return;
-    const interval = setInterval(pollStatus, 5000);
-    return () => clearInterval(interval);
+    const hasActive = () => stateRef.current.activities.some(a => a.status === 1);
+    const tick = () => {
+      pollStatus();
+      pollTimerRef.current = setTimeout(tick, hasActive() ? 2000 : 10000);
+    };
+    pollTimerRef.current = setTimeout(tick, hasActive() ? 2000 : 10000);
+    return () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current); };
   }, [isAuthenticated, token, pollStatus]);
 
   // ===== 一键抢答（一次性操作） =====
@@ -498,7 +512,10 @@ export function useQuizMonitor() {
         } catch { /* ignore */ }
       };
 
+      ws.onopen = () => dispatch({ type: 'SET_WS_CONNECTED', payload: true });
+
       ws.onclose = () => {
+        dispatch({ type: 'SET_WS_CONNECTED', payload: false });
         wsRef.current = null;
         setTimeout(() => { if (useAuthStore.getState().token) connectWS(); }, 5000);
       };
@@ -507,6 +524,7 @@ export function useQuizMonitor() {
   }, [pollStatus]);
 
   const disconnectWS = useCallback(() => {
+    dispatch({ type: 'SET_WS_CONNECTED', payload: false });
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();
@@ -572,5 +590,6 @@ export function useQuizMonitor() {
     // 获取最新活动列表和状态
     refreshStatus: pollStatus,
     fetchCourses,
+    isWSConnected: state.isWSConnected,
   };
 }

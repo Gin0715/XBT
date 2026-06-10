@@ -10,6 +10,8 @@ type QuizActivity struct {
 	CourseID    int64     `gorm:"not null;index" json:"course_id"`
 	ClassID     int64     `gorm:"not null" json:"class_id"`
 	CourseName  string    `gorm:"size:255" json:"course_name"`
+	Teacher     string    `gorm:"size:255" json:"teacher"`
+	Icon        string    `gorm:"size:1024" json:"icon"`
 	Title       string    `gorm:"size:255" json:"title"`
 	StartTime   int64     `gorm:"not null" json:"start_time"`
 	EndTime     int64     `gorm:"not null" json:"end_time"`
@@ -39,12 +41,14 @@ type QuizConfig struct {
 	UserUID        int64     `gorm:"not null;uniqueIndex" json:"user_uid"`
 	Enabled        bool      `gorm:"not null;default:false" json:"enabled"`
 	AutoAnswer     bool      `gorm:"not null;default:true" json:"auto_answer"`
-	MonitorCourses string    `gorm:"type:text" json:"monitor_courses"` // JSON数组，监控的课程ID
-	CourseID       int64     `gorm:"not null;default:0" json:"course_id"`        // 当前监控课程
-	ClassID        int64     `gorm:"not null;default:0" json:"class_id"`         // 当前监控班级
-	DelayMs        int       `gorm:"not null;default:0" json:"delay_ms"`         // 抢答延迟(毫秒)
-	WSEnabled      bool      `gorm:"not null;default:true" json:"ws_enabled"`    // 是否启用 WebSocket
-	WSUrl          string    `gorm:"size:512" json:"ws_url"`                     // 自定义 WS URL（空=自动发现）
+	MonitorCourses string    `gorm:"type:text" json:"monitor_courses"` // JSON数组，监控的课程ID（保留字段）
+	CourseID       int64     `gorm:"not null;default:0" json:"course_id"`          // 当前监控课程
+	ClassID        int64     `gorm:"not null;default:0" json:"class_id"`           // 当前监控班级
+	CourseName     string    `gorm:"size:255" json:"course_name"`                  // 课程名称缓存（自动填充）
+	Icon           string    `gorm:"size:1024" json:"icon"`                        // 课程图标URL缓存
+	DelayMs        int       `gorm:"not null;default:0" json:"delay_ms"`           // 抢答延迟(毫秒)
+	WSEnabled      bool      `gorm:"not null;default:true" json:"ws_enabled"`      // 是否启用 WebSocket
+	WSUrl          string    `gorm:"size:512" json:"ws_url"`                       // 自定义 WS URL（空=自动发现）
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

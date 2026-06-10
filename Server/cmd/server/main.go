@@ -41,8 +41,14 @@ func main() {
 	credentialCrypto := service.NewCredentialCrypto(cfg.CredentialSecret)
 	xxtClient := xxt.New(cfg.ChaoxingAESKey, cfg.ChaoxingUserAgent, cfg.AllowInsecureTLS, cfg.ActivityListLimit+1)
 
+	// 创建课程共享缓存（从 DB 预热）
+	courseCache := service.NewCourseCache(database)
+	if err := courseCache.WarmUp(); err != nil {
+		log.Printf("course cache warmup failed: %v", err)
+	}
+
 	authHandler := handler.NewAuthHandler(database, jwtSvc, credentialCrypto, xxtClient)
-	courseHandler := handler.NewCourseHandler(database, xxtClient, credentialCrypto)
+	courseHandler := handler.NewCourseHandler(database, xxtClient, credentialCrypto, courseCache)
 	signSvc := service.NewSignService(database, xxtClient, credentialCrypto)
 	signHandler := handler.NewSignHandler(database, xxtClient, credentialCrypto, signSvc, cfg.ActivityListLimit)
 	whitelistHandler := handler.NewWhitelistHandler(database)
@@ -54,7 +60,7 @@ func main() {
 	}
 
 	// 初始化 MonitorService 并传入 QuizHandler
-	quizSvc := quizsvc.NewQuizService(database, xxtClient, credentialCrypto)
+	quizSvc := quizsvc.NewQuizService(database, xxtClient, credentialCrypto, courseCache)
 	quizHandler := quizhandler.NewQuizHandler(database, xxtClient, credentialCrypto, quizSvc)
 	// 将 Monitor 注册到 WS Hub（WS 断开时自动停止监控）
 	quizsvc.DefaultWSHub.SetMonitor(quizSvc.Monitor)
@@ -84,6 +90,7 @@ func main() {
 		{
 			authed.GET("/courses", courseHandler.List)
 			authed.POST("/courses/sync", courseHandler.Sync)
+			authed.GET("/courses/icon", courseHandler.Icon)
 			authed.GET("/bmap/search", bmapHandler.Search)
 			authed.PUT("/courses/selection", courseHandler.UpdateSelection)
 

@@ -45,9 +45,10 @@ type subscriber struct {
 
 // QuizService 抢答服务（手动模式）
 type QuizService struct {
-	db        *gorm.DB
-	xxtClient *xxt.Client
-	cc        *svc.CredentialCrypto
+	db          *gorm.DB
+	xxtClient   *xxt.Client
+	cc          *svc.CredentialCrypto
+	courseCache *svc.CourseCache
 
 	subscribers map[int64][]*subscriber
 	subMu       sync.RWMutex
@@ -97,11 +98,12 @@ type BatchAnswerResult struct {
 }
 
 // NewQuizService 创建抢答服务
-func NewQuizService(db *gorm.DB, xxtClient *xxt.Client, cc *svc.CredentialCrypto) *QuizService {
+func NewQuizService(db *gorm.DB, xxtClient *xxt.Client, cc *svc.CredentialCrypto, courseCache *svc.CourseCache) *QuizService {
 	svc := &QuizService{
 		db:          db,
 		xxtClient:   xxtClient,
 		cc:          cc,
+		courseCache: courseCache,
 		subscribers: make(map[int64][]*subscriber),
 		userCache:   make(map[int64]*UserContext),
 		answering:          make(map[string]bool),
@@ -407,6 +409,48 @@ func (s *QuizService) ensureUserContext(userUID int64) *UserContext {
 	return ctx
 }
 
+// lookupCourseNameByID 根据 courseID/classID 查询课程名称（优先查共享缓存，其次 courses 表）
+func (s *QuizService) lookupCourseNameByID(courseID, classID int64) string {
+	if courseID == 0 {
+		return ""
+	}
+	// 先从共享缓存读取
+	if name, _, _, ok := s.courseCache.Get(courseID, classID); ok {
+		return name
+	}
+	// 缓存未命中 → 从 courses 表查
+	var course mainmodel.Course
+	if err := s.db.Select("name").Where("course_id = ? AND class_id = ?", courseID, classID).Take(&course).Error; err == nil {
+		s.courseCache.Set(course.CourseID, course.ClassID, course.Name, course.Teacher, course.Icon)
+		return course.Name
+	}
+	return fmt.Sprintf("课程%d", courseID)
+}
+
+// lookupCourseInfo 查询课程的完整信息（名称/教师/图标），优先使用共享缓存
+func (s *QuizService) lookupCourseInfo(courseID, classID int64) (name, teacher, icon string) {
+	if courseID == 0 {
+		return "", "", ""
+	}
+	// 优先从共享课程缓存读取
+	if name, teacher, icon, ok := s.courseCache.Get(courseID, classID); ok {
+		return name, teacher, icon
+	}
+	// 缓存未命中 → 从 courses 表查（含完整信息）
+	var course mainmodel.Course
+	if err := s.db.Select("name, teacher, icon").Where("course_id = ? AND class_id = ?", courseID, classID).Take(&course).Error; err == nil {
+		// 写入缓存供后续使用
+		s.courseCache.Set(course.CourseID, course.ClassID, course.Name, course.Teacher, course.Icon)
+		return course.Name, course.Teacher, course.Icon
+	}
+	// 回退到 QuizConfig 中的名称缓存
+	var cfg model.QuizConfig
+	if err := s.db.Select("course_name, icon").Where("course_id = ? AND class_id = ?", courseID, classID).Take(&cfg).Error; err == nil && cfg.CourseName != "" {
+		return cfg.CourseName, "", cfg.Icon
+	}
+	return fmt.Sprintf("课程%d", courseID), "", ""
+}
+
 // lookupCourseName 查询课程名称（走缓存）
 func (s *QuizService) lookupCourseName(ctx *UserContext) string {
 	if ctx.config.CourseID == 0 {
@@ -448,6 +492,21 @@ func (s *QuizService) UpdateConfig(userUID int64, cfg *model.QuizConfig) error {
 	}
 	if cfg.ClassID > 0 {
 		existing.ClassID = cfg.ClassID
+	}
+	// 更新课程名称和图标的缓存
+	if cfg.CourseID > 0 {
+		if cfg.CourseName != "" {
+			existing.CourseName = cfg.CourseName
+		} else {
+			existing.CourseName = s.lookupCourseNameByID(existing.CourseID, existing.ClassID)
+		}
+		// 从共享缓存或 DB 获取图标
+		_, _, icon := s.lookupCourseInfo(existing.CourseID, existing.ClassID)
+		if icon != "" {
+			existing.Icon = icon
+		} else if cfg.Icon != "" {
+			existing.Icon = cfg.Icon
+		}
 	}
 	if cfg.WSUrl != "" {
 		existing.WSUrl = cfg.WSUrl

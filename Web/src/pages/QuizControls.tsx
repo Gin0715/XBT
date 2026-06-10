@@ -86,8 +86,21 @@ function QuizControlsInner({
                     className={`btn-tap-sm p-3 rounded-2xl cursor-pointer flex items-center gap-3 transition-all duration-200 ${sel ? 'border-2 shadow-sm' : 'border-2 border-transparent hover:bg-white hover:border-slate-100'}`}
                     style={sel ? { background: 'rgba(22,93,255,0.05)', borderColor: 'rgba(22,93,255,0.3)' } : { background: 'rgba(248,250,252,0.5)' }}
                   >
-                    <div className="w-11 h-11 rounded-xl bg-white shadow-sm overflow-hidden flex-shrink-0 flex items-center justify-center border border-slate-100">
-                      {course.icon ? <img src={course.icon} alt="" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <BookOpen className="w-5 h-5 text-slate-300" />}
+                    <div className="w-11 h-11 rounded-xl shadow-sm overflow-hidden flex-shrink-0 flex items-center justify-center border border-slate-100" style={{ background: 'linear-gradient(135deg, #f1f5f9, #e2e8f0)' }}>
+                      {course.icon ? (
+                        <img src={course.icon} referrerPolicy="no-referrer" alt=""
+                          className="w-full h-full object-cover"
+                          onError={e => {
+                            const target = e.target as HTMLImageElement;
+                            if (!target.dataset.fallback) {
+                              target.dataset.fallback = '1';
+                              target.src = `/api/courses/icon?course_id=${course.course_id}&class_id=${course.class_id}`;
+                            }
+                          }}
+                        />
+                      ) : (
+                        <BookOpen className="w-5 h-5 text-slate-300" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm text-text-primary truncate">{course.name}</p>

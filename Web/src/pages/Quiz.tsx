@@ -28,9 +28,10 @@ export default function Quiz() {
     setSelectedCourse,
     saveConfig,
     toggleMonitor,
-    fetchCourses,
     refreshStatus,
     syncCourses,
+    isWSConnected,
+    doManualAnswer,
   } = useQuizMonitor();
 
   useEffect(() => {
@@ -84,6 +85,11 @@ export default function Quiz() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* WS 连接状态指示 */}
+          <div className="flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: isWSConnected ? 'rgba(0,180,42,0.08)' : 'rgba(245,63,63,0.08)' }}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isWSConnected ? 'bg-green-500' : 'bg-red-400'}`} />
+            <span className="text-[9px] font-semibold" style={{ color: isWSConnected ? '#00B42A' : '#F53F3F' }}>{isWSConnected ? '已连接' : '断开'}</span>
+          </div>
           <div className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,180,42,0.08)' }}>
             <span className="text-[11px] font-bold text-success-500">✅ {stats.success}</span>
           </div>
@@ -138,7 +144,7 @@ export default function Quiz() {
               </span>
             )}
           </button>
-          <button onClick={() => { setActiveTab('settings'); fetchCourses(); }}
+          <button onClick={() => setActiveTab('settings')}
             className={`flex-1 py-2.5 text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-200 ${
               activeTab === 'settings'
                 ? 'text-white shadow-sm'
@@ -159,6 +165,7 @@ export default function Quiz() {
               config={config}
               selectedCourse={selectedCourse}
               onShowSettings={() => setActiveTab('settings')}
+              onRetry={(activityId, courseId, classId) => doManualAnswer(activityId, courseId, classId)}
             />
 
             {answerLogs.length > 0 && (
