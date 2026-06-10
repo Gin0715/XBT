@@ -1,10 +1,9 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -12,80 +11,357 @@ import (
 	mainmodel "xbt2/server/internal/model"
 	"xbt2/server/internal/quiz/model"
 	svc "xbt2/server/internal/service"
+	"context"
 	"xbt2/server/internal/xxt"
 )
 
-// MonitorEvent SSE 实时事件
+// ================= 事件推送（保留用于 WS/SSE 结果推送） =================
+
+// MonitorEvent 抢答事件
 type MonitorEvent struct {
-	Type       string `json:"type"`                 // detected / answered / status
+	Type       string `json:"type"`
 	ActivityID int64  `json:"activity_id,omitempty"`
 	Name       string `json:"name,omitempty"`
 	CourseName string `json:"course_name,omitempty"`
 	Success    bool   `json:"success,omitempty"`
 	Message    string `json:"message,omitempty"`
-	Elapsed    int64  `json:"elapsed,omitempty"`    // 抢答耗时(毫秒)
+	Elapsed    int64  `json:"elapsed,omitempty"`
 	Running    bool   `json:"running,omitempty"`
 	Timestamp  int64  `json:"timestamp"`
 }
+
+const (
+	EventDetected = "detected"
+	EventAnswered = "answered"
+	EventStatus   = "status"
+	EventWarning  = "warning"
+)
 
 type subscriber struct {
 	ch chan MonitorEvent
 }
 
-type QuizMonitorService struct {
-	db          *gorm.DB
-	xxtClient   *xxt.Client
-	cc          *svc.CredentialCrypto
-	monitors    map[int64]*MonitorInstance
-	mu          sync.RWMutex
-	subscribers map[int64][]*subscriber // userUID → 订阅者列表
+// ================= 核心服务 =================
+
+// QuizService 抢答服务（手动模式）
+type QuizService struct {
+	db        *gorm.DB
+	xxtClient *xxt.Client
+	cc        *svc.CredentialCrypto
+
+	subscribers map[int64][]*subscriber
 	subMu       sync.RWMutex
+
+	// 用户上下文缓存（凭证 + 风控状态）
+	userCache map[int64]*UserContext
+	cacheMu   sync.RWMutex
+
+	// 活动防重锁: key="userUID:activityID"
+	answering   map[string]bool
+	answeringMu sync.Mutex
+// 一键抢答 10s 防重复提交
+	oneClickCooldowns   map[int64]time.Time // userUID â cooldown until
+	oneClickCooldownsMu sync.Mutex
+
+	// Monitor is the auto-detect and answer monitor
+	Monitor *QuizMonitor
 }
 
-type MonitorInstance struct {
-	muAnswered       sync.Mutex // 保护 answered map 并发访问
-	UserUID          int64
-	Config           *model.QuizConfig
-	Running          bool
-	StopChan         chan struct{}
-	stopOnce         sync.Once   // 确保 StopChan 只关闭一次
-	answered         map[int64]bool
-	cachedMobile     string      // 缓存的用户名，避免每次轮询查库
-	cachedPassword   string      // 缓存的密码，避免每次轮询解密
-	cachedCourseName string      // 缓存的课程名，避免每次轮询查库
-	activeMode       bool        // 活跃模式：发现活动后进入高频轮询
-	idleStreak       int         // 连续空闲次数，用于动态降频
-	turboMode        bool        // 极速模式：有待开始活动即将启动（预判预热）
-	lastAnswerTime   int64       // 上次抢答成功时间戳（毫秒），用于保持活跃期
-	pendingActivities map[int64]*pendingActInfo // 待开始活动: activeID → 活动信息
+// UserContext 用户运行时上下文
+type UserContext struct {
+	cachedMobile        string
+	cachedPassword      string
+	config              *model.QuizConfig
+	backoffStrategy     *BackoffStrategy
+	backoffUntil        time.Time
+	pausedUntil         time.Time
+	consecutiveFailures int
 }
 
-// pendingActInfo 预判预热的活动信息
-type pendingActInfo struct {
-	StartTime int64  // 活动开始时间（毫秒时间戳）
-	Name      string // 活动名称
+// AnswerResult 一键抢答结果
+type AnswerResult struct {
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	ElapsedMs  int64  `json:"elapsed_ms"`
+	ActivityID int64  `json:"activity_id"`
 }
 
-func NewQuizMonitorService(db *gorm.DB, xxtClient *xxt.Client, cc *svc.CredentialCrypto) *QuizMonitorService {
-	return &QuizMonitorService{
+// BatchAnswerResult æ¹éæ¢ç­æ±æ»ç»æ
+type BatchAnswerResult struct {
+	Total   int             `json:"total"`    // æ£æµå°çæ´»å¨æ»æ°
+	Success int             `json:"success"`  // æåæ°
+	Failed  int             `json:"failed"`   // å¤±è´¥æ°
+	Skipped int             `json:"skipped"`  // è·³è¿æ°ï¼å·²æ¢ç­/å·²ç»æï¼
+	Details []*AnswerResult  `json:"details"`  // æ¯ä¸ªæ´»å¨çè¯¦ç»ç»æ
+	Elapsed int64            `json:"elapsed_ms"` // æ»èæ¶
+}
+
+// NewQuizService 创建抢答服务
+func NewQuizService(db *gorm.DB, xxtClient *xxt.Client, cc *svc.CredentialCrypto) *QuizService {
+	svc := &QuizService{
 		db:          db,
 		xxtClient:   xxtClient,
 		cc:          cc,
-		monitors:    make(map[int64]*MonitorInstance),
 		subscribers: make(map[int64][]*subscriber),
+		userCache:   make(map[int64]*UserContext),
+		answering:          make(map[string]bool),
+		oneClickCooldowns: make(map[int64]time.Time),
+	}
+	svc.Monitor = NewQuizMonitor(svc, xxtClient)
+	return svc
+}
+
+// ================= 一键抢答 =================
+
+// ManualQuickAnswer 手动一键抢答
+// shortDelay: delayMs ≤ 1000ms 时同步执行，返回完整结果
+// longDelay:  delayMs > 1000ms 时异步执行，返回"已触发"状态，通过 WS/SSE 推送结果
+func (s *QuizService) ManualQuickAnswer(cctx context.Context, userUID int64, activeID, courseID, classID int64) (*AnswerResult, error) {
+	// 1. 防重锁：同一用户同一活动只能抢答一次
+	lockKey := fmt.Sprintf("%d:%d", userUID, activeID)
+	s.answeringMu.Lock()
+	if s.answering[lockKey] {
+		s.answeringMu.Unlock()
+		return nil, fmt.Errorf("该活动正在抢答中，请勿重复操作")
+	}
+	s.answering[lockKey] = true
+	s.answeringMu.Unlock()
+	defer func() {
+		s.answeringMu.Lock()
+		delete(s.answering, lockKey)
+		s.answeringMu.Unlock()
+	}()
+
+	// 2. 获取用户配置和凭证
+	userCtx := s.ensureUserContext(userUID)
+	if userCtx == nil {
+		return nil, fmt.Errorf("获取用户信息失败")
+	}
+	if userCtx.config.CourseID == 0 || userCtx.config.ClassID == 0 {
+		return nil, fmt.Errorf("请先在设置中配置课程")
+	}
+
+	// 3. 检查风控暂停
+	userCtx = s.ensureUserContext(userUID) // 刷新
+	if userCtx.pausedUntil.After(time.Now()) {
+		return nil, fmt.Errorf("请等待风控冷却结束后再试（剩余 %.0fs）",
+			userCtx.pausedUntil.Sub(time.Now()).Seconds())
+	}
+
+	// 4. 检查退避
+	if userCtx.backoffUntil.After(time.Now()) {
+		return nil, fmt.Errorf("操作过于频繁，请稍后再试")
+	}
+
+	// 5. 检查活动状态 & 处理等待学生就位模式
+	prepResult, prepErr := s.checkAndPrepareActivity(cctx, userCtx, userUID, activeID, courseID, classID)
+	if prepErr != nil {
+		return nil, prepErr
+	}
+	if prepResult != nil {
+		return prepResult, nil
+	}
+
+	// 6. 执行抢答
+	delayMs := userCtx.config.DelayMs
+
+	// 长延迟 → 异步
+	if delayMs > 1000 {
+		go s.runDelayedAnswer(userCtx, userUID, activeID, courseID, classID, delayMs)
+		return &AnswerResult{
+			Success:    true,
+			Message:    fmt.Sprintf("抢答已触发（延迟 %dms），结果将通过实时推送通知", delayMs),
+			ActivityID: activeID,
+		}, nil
+	}
+
+	// 短延迟 → 同步
+	return s.executeAnswer(cctx, userCtx, userUID, activeID, courseID, classID, delayMs)
+}
+
+// runDelayedAnswer 异步执行带延迟的抢答
+func (s *QuizService) runDelayedAnswer(userCtx *UserContext, userUID, activeID, courseID, classID int64, delayMs int) {
+	// 异步执行创建新的可取消上下文
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// 等待延迟时间
+	if delayMs > 0 {
+		jitter := rand.Intn(100)
+		time.Sleep(time.Duration(delayMs+jitter) * time.Millisecond)
+	}
+
+	_, err := s.executeAnswer(runCtx, userCtx, userUID, activeID, courseID, classID, 0)
+	if err != nil {
+		log.Printf("[Quiz] 异步抢答失败: uid=%d active=%d err=%v", userUID, activeID, err)
+		s.broadcast(userUID, MonitorEvent{
+			Type:       EventAnswered,
+			ActivityID: activeID,
+			Success:    false,
+			Message:    err.Error(),
+			Elapsed:    0,
+		})
 	}
 }
 
-func (s *QuizMonitorService) StartMonitor(userUID int64, courseID, classID int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 安全停止旧实例（如果存在）
-	if existing, exists := s.monitors[userUID]; exists {
-		existing.safeStop()
-		delete(s.monitors, userUID)
+// executeAnswer 执行单次抢答（含延迟、重试、风控）
+func (s *QuizService) executeAnswer(cctx context.Context, userCtx *UserContext, userUID, activeID, courseID, classID int64, delayMs int) (*AnswerResult, error) {
+	// 延迟等待（异步调用时 delayMs=0，因为已在 runDelayedAnswer 中等过）
+	if delayMs > 0 {
+		jitter := rand.Intn(100)
+		time.Sleep(time.Duration(delayMs+jitter) * time.Millisecond)
 	}
 
+	var lastResult *AnswerResult
+	maxRetries := 2
+
+	for retry := 0; retry <= maxRetries; retry++ {
+		if retry > 0 {
+			// 指数退避：100ms → 300ms → 500ms
+			backoffMs := 100 * (1 << (retry - 1))
+			if backoffMs > 500 {
+				backoffMs = 500
+			}
+			jitterMs := rand.Intn(100)
+			select {
+			case <-cctx.Done():
+				log.Printf("[Quiz] ⏰ 用户已取消重试: uid=%d active=%d", userUID, activeID)
+				return nil, cctx.Err()
+			case <-time.After(time.Duration(backoffMs+jitterMs) * time.Millisecond):
+			}
+		}
+
+		answerStart := time.Now()
+		result, err := s.xxtClient.QuickAnswer(userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID, activeID)
+		elapsed := time.Since(answerStart).Milliseconds()
+
+		if err != nil {
+			if result != "" && xxt.IsAntiCrawlResponse(result) >= 2 {
+				s.handleAntiCrawl(userCtx, result)
+			}
+			continue
+		}
+
+		// 风控检测（JSON 响应中的风控）
+		if xxt.IsAntiCrawlResponse(result) >= 2 {
+			s.handleAntiCrawl(userCtx, result)
+		}
+
+		isSuccess, msg, isFinal, _ := xxt.ParseQuickAnswerResult(result)
+
+		lastResult = &AnswerResult{
+			Success:    isSuccess,
+			Message:    msg,
+			ElapsedMs:  elapsed,
+			ActivityID: activeID,
+		}
+
+		if isSuccess {
+			// 尝试获取超星服务端记录的真实抢答时间
+			serverTs := xxt.ExtractAnswerServerTime(result)
+
+			// 若响应中无时间戳，再请求活动详情获取服务端时间
+			if serverTs == 0 {
+				if attendInfo, err := s.xxtClient.GetAnswerAttendInfo(
+					userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID, activeID,
+				); err == nil {
+					serverTs = attendInfo.Data.PptActive.Servertime
+					if serverTs > 0 && attendInfo.Data.PptActive.StartTime > 0 {
+						// 使用(服务端当前时间 - 活动开始时间)作为真实抢答耗时
+						realElapsed := serverTs - attendInfo.Data.PptActive.StartTime
+						if realElapsed > 0 && realElapsed < 3600000 { // 不超过1小时
+							elapsed = realElapsed
+							log.Printf("[Quiz] 📡 服务端抢答耗时: %dms (server=%d start=%d)",
+								elapsed, serverTs, attendInfo.Data.PptActive.StartTime)
+						}
+					}
+				}
+			}
+
+			// 抢答成功
+			log.Printf("[Quiz] ✅ 抢答成功: uid=%d active=%d msg=%s elapsed=%dms serverTs=%d",
+				userUID, activeID, msg, elapsed, serverTs)
+			s.saveRecord(userUID, activeID, true, msg)
+			s.broadcast(userUID, MonitorEvent{
+				Type:       EventAnswered,
+				ActivityID: activeID,
+				Success:    true,
+				Message:    msg,
+				Elapsed:    elapsed,
+			})
+			return lastResult, nil
+		}
+
+		if isFinal {
+			log.Printf("[Quiz] ⏭ 跳过(终态): uid=%d active=%d msg=%s", userUID, activeID, msg)
+			s.saveRecord(userUID, activeID, false, msg)
+			s.broadcast(userUID, MonitorEvent{
+				Type:       EventAnswered,
+				ActivityID: activeID,
+				Success:    false,
+				Message:    msg,
+				Elapsed:    elapsed,
+			})
+			return lastResult, fmt.Errorf(msg)
+		}
+
+		log.Printf("[Quiz] ❌ 抢答失败(重试): uid=%d active=%d msg=%s elapsed=%dms",
+			userUID, activeID, msg, elapsed)
+	}
+
+	if lastResult != nil {
+		s.saveRecord(userUID, activeID, false, lastResult.Message)
+		s.broadcast(userUID, MonitorEvent{
+			Type:       EventAnswered,
+			ActivityID: activeID,
+			Success:    false,
+			Message:    lastResult.Message,
+			Elapsed:    lastResult.ElapsedMs,
+		})
+		return lastResult, fmt.Errorf(lastResult.Message)
+	}
+	return nil, fmt.Errorf("抢答请求失败（多次重试后仍无法提交）")
+}
+
+// ================= 风控处理 =================
+
+func (s *QuizService) handleAntiCrawl(userCtx *UserContext, response string) {
+	userCtx.consecutiveFailures++
+	if userCtx.consecutiveFailures > 12 {
+		userCtx.consecutiveFailures = 12
+	}
+
+	backoffDelay := userCtx.backoffStrategy.NextBackoff()
+	userCtx.backoffUntil = time.Now().Add(backoffDelay)
+
+	if userCtx.consecutiveFailures >= 5 {
+		userCtx.pausedUntil = time.Now().Add(10 * time.Second)
+	}
+
+	respSummary := response
+	if len(respSummary) > 120 {
+		respSummary = respSummary[:120] + "..."
+	}
+	log.Printf("[Quiz] 🚫 风控触发: uid=? consecutive=%d backoff=%v resp=%s",
+		userCtx.consecutiveFailures, backoffDelay, respSummary)
+	if userCtx.consecutiveFailures >= 5 {
+		log.Printf("[Quiz] 🛑 风控降温 10s: consecutive=%d", userCtx.consecutiveFailures)
+	}
+
+	// 风控后清空活动缓存，下次请求强制刷新
+	s.xxtClient.ResetQuizCache(0, 0)
+}
+
+// ================= 用户上下文管理 =================
+
+func (s *QuizService) ensureUserContext(userUID int64) *UserContext {
+	s.cacheMu.RLock()
+	ctx, exists := s.userCache[userUID]
+	s.cacheMu.RUnlock()
+	if exists && ctx.config != nil {
+		return ctx
+	}
+
+	// 加载配置
 	config := &model.QuizConfig{}
 	if err := s.db.Where("user_uid = ?", userUID).First(config).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -94,123 +370,110 @@ func (s *QuizMonitorService) StartMonitor(userUID int64, courseID, classID int64
 				Enabled:    true,
 				AutoAnswer: true,
 				DelayMs:    0,
-				CourseID:   courseID,
-				ClassID:    classID,
 			}
 			s.db.Create(config)
 		} else {
-			return err
+			return nil
 		}
-	} else {
-		if courseID > 0 {
-			config.CourseID = courseID
-		}
-		if classID > 0 {
-			config.ClassID = classID
-		}
-		s.db.Save(config)
 	}
 
-	// 清空抢答缓存，避免旧会话的风控退避状态影响新监控
-	s.xxtClient.ResetQuizCache(config.CourseID, config.ClassID)
-
-	answered := s.loadAnsweredFromDB(userUID, config.CourseID, config.ClassID)
-
-	instance := &MonitorInstance{
-		UserUID:           userUID,
-		Config:            config,
-		Running:           true,
-		StopChan:          make(chan struct{}),
-		answered:          answered,
-		pendingActivities: make(map[int64]*pendingActInfo),
-	}
-	// 预热凭证缓存（避免每次轮询都查库+解密）
+	// 解密凭证
+	var mobile, password string
 	var user mainmodel.User
 	if err := s.db.Where("uid = ?", userUID).First(&user).Error; err == nil {
-		if password, err := s.cc.Decrypt(user.CredentialCipher); err == nil {
-			instance.cachedMobile = user.Mobile
-			instance.cachedPassword = password
+		mobile = user.Mobile
+		if pwd, err := s.cc.Decrypt(user.CredentialCipher); err == nil {
+			password = pwd
 		}
 	}
 
-	s.monitors[userUID] = instance
-	go s.runMonitor(instance)
+	if exists {
+		// 复用已有对象，更新字段
+		ctx.config = config
+		ctx.cachedMobile = mobile
+		ctx.cachedPassword = password
+		return ctx
+	}
 
-	// 实时广播：监控已启动
-	s.broadcast(userUID, MonitorEvent{
-		Type:    EventStatus,
-		Running: true,
-		Message: "监控已启动",
-	})
+	ctx = &UserContext{
+		cachedMobile:    mobile,
+		cachedPassword:  password,
+		config:          config,
+		backoffStrategy: NewBackoffStrategy(),
+	}
+	s.cacheMu.Lock()
+	s.userCache[userUID] = ctx
+	s.cacheMu.Unlock()
+	return ctx
+}
 
+// lookupCourseName 查询课程名称（走缓存）
+func (s *QuizService) lookupCourseName(ctx *UserContext) string {
+	if ctx.config.CourseID == 0 {
+		return ""
+	}
+	var course mainmodel.Course
+	if err := s.db.Where("course_id = ? AND class_id = ?",
+		ctx.config.CourseID, ctx.config.ClassID).
+		First(&course).Error; err == nil {
+		return course.Name
+	}
+	return ""
+}
+
+// ================= 配置管理 =================
+
+func (s *QuizService) GetConfig(userUID int64) (*model.QuizConfig, error) {
+	config := &model.QuizConfig{}
+	err := s.db.Where("user_uid = ?", userUID).First(config).Error
+	if err == gorm.ErrRecordNotFound {
+		return &model.QuizConfig{UserUID: userUID, AutoAnswer: true, DelayMs: 0, WSEnabled: true}, nil
+	}
+	return config, err
+}
+
+func (s *QuizService) UpdateConfig(userUID int64, cfg *model.QuizConfig) error {
+	existing := &model.QuizConfig{}
+	err := s.db.Where("user_uid = ?", userUID).First(existing).Error
+	if err == gorm.ErrRecordNotFound {
+		cfg.UserUID = userUID
+		return s.db.Create(cfg).Error
+	}
+	existing.AutoAnswer = cfg.AutoAnswer
+	existing.DelayMs = cfg.DelayMs
+	existing.Enabled = cfg.Enabled
+	existing.WSEnabled = cfg.WSEnabled
+	if cfg.CourseID > 0 {
+		existing.CourseID = cfg.CourseID
+	}
+	if cfg.ClassID > 0 {
+		existing.ClassID = cfg.ClassID
+	}
+	if cfg.WSUrl != "" {
+		existing.WSUrl = cfg.WSUrl
+	}
+	if cfg.MonitorCourses != "" {
+		existing.MonitorCourses = cfg.MonitorCourses
+	}
+	if err := s.db.Save(existing).Error; err != nil {
+		return err
+	}
+
+	// 更新缓存
+	s.cacheMu.RLock()
+	ctx, exists := s.userCache[userUID]
+	s.cacheMu.RUnlock()
+	if exists {
+		s.cacheMu.Lock()
+		ctx.config = existing
+		s.cacheMu.Unlock()
+	}
 	return nil
 }
 
-// safeStop 安全停止 MonitorInstance，避免重复关闭 StopChan
-func (m *MonitorInstance) safeStop() {
-	m.stopOnce.Do(func() {
-		close(m.StopChan)
-		m.Running = false
-	})
-}
+// ================= 事件订阅（SSE / WebSocket 推送） =================
 
-func (s *QuizMonitorService) loadAnsweredFromDB(userUID, courseID, classID int64) map[int64]bool {
-	result := make(map[int64]bool)
-	var activities []model.QuizActivity
-	s.db.Where("user_uid = ? AND course_id = ? AND class_id = ?",
-		userUID, courseID, classID).Find(&activities)
-	for _, a := range activities {
-		result[a.ActivityID] = true
-	}
-	var records []model.QuizRecord
-	s.db.Where("user_uid = ? AND activity_id IN (SELECT activity_id FROM quiz_activities WHERE user_uid = ? AND course_id = ? AND class_id = ?)",
-		userUID, userUID, courseID, classID).Find(&records)
-	for _, r := range records {
-		result[r.ActivityID] = true
-	}
-	return result
-}
-
-func (s *QuizMonitorService) StopMonitor(userUID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if instance, exists := s.monitors[userUID]; exists {
-		instance.safeStop()
-		delete(s.monitors, userUID)
-
-		// 实时广播：监控已停止
-		s.broadcast(userUID, MonitorEvent{
-			Type:    EventStatus,
-			Running: false,
-			Message: "监控已停止",
-		})
-	}
-}
-
-func (s *QuizMonitorService) GetMonitorStatus(userUID int64) *model.QuizMonitorStatus {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	instance, exists := s.monitors[userUID]
-	status := &model.QuizMonitorStatus{
-		UserUID:   userUID,
-		IsRunning: exists && instance.Running,
-		Connected: exists && instance.Running,
-	}
-	if exists {
-		status.ActivityCount = len(instance.answered)
-	}
-	return status
-}
-
-// 事件类型常量
-const (
-	EventDetected = "detected" // 发现抢答活动
-	EventAnswered = "answered" // 抢答结果
-	EventStatus   = "status"   // 监控状态变更
-)
-
-// Subscribe 订阅实时事件，返回事件通道和取消函数
-func (s *QuizMonitorService) Subscribe(userUID int64) (<-chan MonitorEvent, func()) {
+func (s *QuizService) Subscribe(userUID int64) (<-chan MonitorEvent, func()) {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	sub := &subscriber{ch: make(chan MonitorEvent, 32)}
@@ -230,335 +493,32 @@ func (s *QuizMonitorService) Subscribe(userUID int64) (<-chan MonitorEvent, func
 	return sub.ch, cancel
 }
 
-func (s *QuizMonitorService) broadcast(userUID int64, evt MonitorEvent) {
+func (s *QuizService) broadcast(userUID int64, evt MonitorEvent) {
 	evt.Timestamp = time.Now().UnixMilli()
-	// SSE 通道（内存 channel）
 	s.subMu.RLock()
 	for _, sub := range s.subscribers[userUID] {
 		select {
 		case sub.ch <- evt:
 		default:
-			// 订阅者消费太慢，丢弃事件（非阻塞）
 		}
 	}
 	s.subMu.RUnlock()
-	// WebSocket 通道（前端直连）
+
 	switch evt.Type {
 	case EventDetected:
 		BroadcastQuizActivity(userUID, evt)
 	case EventAnswered:
 		BroadcastQuizRecord(userUID, evt)
+	case EventStatus:
+		BroadcastQuizRecord(userUID, evt)
+	case EventWarning:
+		BroadcastQuizActivity(userUID, evt)
 	}
 }
 
-func (s *QuizMonitorService) runMonitor(instance *MonitorInstance) {
-	// 立刻执行首次检测
-	s.pollAndAnswer(instance)
+// ================= 数据库操作 =================
 
-	// 自适应轮询间隔：极速 200ms / 活跃 200ms / 空闲逐步放松到 2s
-	pollInterval := 100 * time.Millisecond
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-instance.StopChan:
-			return
-		case <-ticker.C:
-			if !instance.Config.Enabled {
-				continue
-			}
-			s.pollAndAnswer(instance)
-
-			// 动态调整轮询间隔
-			// 抢答后保持 30s 高频轮询（100ms），确保后续抢答也能快速检测
-			now := time.Now().UnixMilli()
-			answerCooldown := instance.lastAnswerTime > 0 && (now - instance.lastAnswerTime) < 30000
-			
-			switch {
-			case instance.turboMode:
-				if pollInterval != 100*time.Millisecond {
-					pollInterval = 100 * time.Millisecond
-					ticker.Reset(pollInterval)
-				}
-			case instance.activeMode || answerCooldown:
-				if pollInterval != 100*time.Millisecond {
-					pollInterval = 100 * time.Millisecond
-					ticker.Reset(pollInterval)
-				}
-				instance.idleStreak++
-				// 仅在超出冷却期后才允许降频
-				if !answerCooldown && instance.idleStreak > 300 {
-					instance.activeMode = false
-					instance.idleStreak = 0
-				}
-			default:
-				instance.idleStreak++
-				if instance.idleStreak > 25 && pollInterval != 1000*time.Millisecond {
-					pollInterval = 1000 * time.Millisecond
-					ticker.Reset(pollInterval)
-				} else if instance.idleStreak > 150 && pollInterval != 2000*time.Millisecond {
-					pollInterval = 2000 * time.Millisecond
-					ticker.Reset(pollInterval)
-				}
-			}
-		}
-	}
-}
-
-func (s *QuizMonitorService) pollAndAnswer(instance *MonitorInstance) {
-	cfg := instance.Config
-	if cfg.CourseID == 0 || cfg.ClassID == 0 {
-		return
-	}
-
-	courseName := s.lookupCourseName(instance)
-
-	// 优先使用缓存凭证
-	mobile := instance.cachedMobile
-	password := instance.cachedPassword
-	if mobile == "" {
-		var user mainmodel.User
-		if err := s.db.Where("uid = ?", instance.UserUID).First(&user).Error; err != nil {
-			return
-		}
-		var err error
-		password, err = s.cc.Decrypt(user.CredentialCipher)
-		if err != nil {
-			return
-		}
-		mobile = user.Mobile
-		instance.cachedMobile = mobile
-		instance.cachedPassword = password
-	}
-
-	actives, err := s.xxtClient.GetActivesAllFast(mobile, password, cfg.CourseID, cfg.ClassID)
-	if err != nil {
-		return
-	}
-
-	for _, act := range actives {
-		instance.muAnswered.Lock()
-		alreadyAnswered := instance.answered[act.ActiveID]
-		instance.muAnswered.Unlock()
-		if alreadyAnswered {
-			continue
-		}
-
-		// 预热队列：检测到待开始活动(status=0)，加入预判列表
-		if act.Status == 0 && act.StartTime > time.Now().UnixMilli() {
-			instance.pendingActivities[act.ActiveID] = &pendingActInfo{StartTime: act.StartTime, Name: act.Name}
-			log.Printf("[QuizMonitor] 📋 待开始活动: uid=%d active=%d name=%s start=%d",
-				instance.UserUID, act.ActiveID, act.Name, act.StartTime)
-			continue
-		}
-		// 活动已开始/结束 → 从预热队列移除
-		delete(instance.pendingActivities, act.ActiveID)
-
-
-		// 跳过已结束的活动（Status=2 或 endTime 已过），避免浪费 API 资源
-		if act.Status == 2 || (act.EndTime > 0 && act.EndTime < time.Now().UnixMilli()) {
-			instance.muAnswered.Lock()
-			instance.answered[act.ActiveID] = true
-			instance.muAnswered.Unlock()
-			continue
-		}
-		name := strings.ToLower(act.Name)
-		isQuiz := strings.Contains(name, "抢答") ||
-			strings.Contains(name, "问答") ||
-			strings.Contains(name, "测验") ||
-			strings.Contains(name, "互动")
-
-		if !isQuiz {
-			continue
-		}
-
-		// 标记为已发现
-		instance.muAnswered.Lock()
-		instance.answered[act.ActiveID] = true
-		instance.muAnswered.Unlock()
-		instance.activeMode = true
-		instance.idleStreak = 0
-
-		log.Printf("[QuizMonitor] 发现抢答: uid=%d active=%d name=%s",
-			instance.UserUID, act.ActiveID, act.Name)
-
-		// 实时广播：发现抢答活动
-		s.broadcast(instance.UserUID, MonitorEvent{
-			Type:       EventDetected,
-			ActivityID: act.ActiveID,
-			Name:       act.Name,
-			CourseName: courseName,
-			Message:    fmt.Sprintf("%d,%d,%d", act.StartTime, act.EndTime, act.Status),
-		})
-
-		// 异步保存记录 + 抢答（DB 操作移出轮询路径，减少检测→抢答延迟）
-		if cfg.AutoAnswer {
-			go s.autoAnswerWithSave(instance, mobile, password, cfg, act, courseName)
-		}
-	}
-
-	// 预热队列检查：是否有活动即将在 3 秒内开始 → 极速模式
-	now := time.Now().UnixMilli()
-	instance.turboMode = false
-	for aid, info := range instance.pendingActivities {
-		if info.StartTime > 0 && info.StartTime-now < 3000 && info.StartTime > now {
-			instance.turboMode = true
-			if info.StartTime-now < 30 {
-				go s.speculativeAnswer(instance, mobile, password, cfg, aid, info.StartTime, info.Name, courseName)
-				delete(instance.pendingActivities, aid)
-			}
-			break
-		}
-		if info.StartTime > 0 && now-info.StartTime > 30000 {
-			delete(instance.pendingActivities, aid)
-		}
-	}
-}
-
-func (s *QuizMonitorService) autoAnswer(instance *MonitorInstance, mobile string, password string, cfg *model.QuizConfig, act xxt.Active) {
-	if cfg.DelayMs > 0 {
-		time.Sleep(time.Duration(cfg.DelayMs) * time.Millisecond)
-	}
-
-	var result string
-	var err error
-	var elapsed int64
-	maxRetries := 2
-
-	for retry := 0; retry <= maxRetries; retry++ {
-		if retry > 0 {
-			log.Printf("[QuizMonitor] 🔄 重试抢答(%d/%d): uid=%d active=%d elapsed=%dms err=%v",
-				retry, maxRetries, instance.UserUID, act.ActiveID, elapsed, err)
-			time.Sleep(100 * time.Millisecond)
-		}
-		answerStart := time.Now()
-		result, err = s.xxtClient.QuickAnswer(mobile, password, cfg.CourseID, cfg.ClassID, act.ActiveID)
-		elapsed = time.Since(answerStart).Milliseconds()
-		if err == nil && isFinalResult(result) {
-			break
-		}
-	}
-
-	if err != nil {
-		log.Printf("[QuizMonitor] ❌ 抢答异常(重试后): uid=%d active=%d err=%v elapsed=%dms", instance.UserUID, act.ActiveID, err, elapsed)
-		s.broadcast(instance.UserUID, MonitorEvent{
-			Type:       EventAnswered,
-			ActivityID: act.ActiveID,
-			Name:       act.Name,
-			Success:    false,
-			Message:    "请求异常: " + err.Error(),
-			Elapsed:    elapsed,
-		})
-		s.saveRecord(instance.UserUID, act.ActiveID, false, "请求异常: "+err.Error())
-		return
-	}
-
-	isSuccess, msg, isFinal := parseQuickAnswerResult(result)
-
-	s.broadcast(instance.UserUID, MonitorEvent{
-		Type:       EventAnswered,
-		ActivityID: act.ActiveID,
-		Name:       act.Name,
-		Success:    isSuccess,
-		Message:    msg,
-		Elapsed:    elapsed,
-	})
-
-	if isSuccess {
-		instance.lastAnswerTime = time.Now().UnixMilli()
-		log.Printf("[QuizMonitor] ✅ 抢答成功: uid=%d active=%d msg=%s elapsed=%dms raw=%s",
-			instance.UserUID, act.ActiveID, msg, elapsed, truncate(result, 200))
-	} else if isFinal {
-		log.Printf("[QuizMonitor] ⏭ 跳过(终态): uid=%d active=%d msg=%s raw=%s",
-			instance.UserUID, act.ActiveID, msg, truncate(result, 200))
-	} else {
-		log.Printf("[QuizMonitor] ❌ 抢答失败: uid=%d active=%d msg=%s elapsed=%dms raw=%s",
-			instance.UserUID, act.ActiveID, msg, elapsed, truncate(result, 200))
-	}
-
-	s.saveRecord(instance.UserUID, act.ActiveID, isSuccess, msg)
-}
-
-// autoAnswerWithSave 异步保存活动记录 + 抢答（DB 操作从轮询路径移出）
-func (s *QuizMonitorService) autoAnswerWithSave(instance *MonitorInstance, mobile string, password string, cfg *model.QuizConfig, act xxt.Active, courseName string) {
-	// 先保存活动记录（异步，不阻塞轮询）
-	activity := &model.QuizActivity{
-		UserUID:    instance.UserUID,
-		ActivityID: act.ActiveID,
-		CourseID:   cfg.CourseID,
-		ClassID:    cfg.ClassID,
-		CourseName: courseName,
-		Title:      act.Name,
-		StartTime:  act.StartTime,
-		EndTime:    act.EndTime,
-		Status:     act.Status,
-		AutoAnswer: cfg.AutoAnswer,
-	}
-	s.db.Where("activity_id = ? AND user_uid = ?", act.ActiveID, instance.UserUID).
-		FirstOrCreate(activity)
-
-	// 执行抢答
-	s.autoAnswer(instance, mobile, password, cfg, act)
-}
-
-// isFinalResult 快速判断 QuickAnswer 返回是否已到终态（用于自动重试判断）
-func isFinalResult(rawResult string) bool {
-	if rawResult == "" {
-		return false
-	}
-	lower := strings.ToLower(rawResult)
-	return strings.Contains(lower, "已过期") ||
-		strings.Contains(lower, "已结束") ||
-		strings.Contains(lower, "学生已抢答") ||
-		strings.Contains(lower, "已抢答") ||
-		strings.Contains(lower, "人数已达上限") ||
-		strings.Contains(lower, "已达上限") ||
-		strings.Contains(rawResult, `"result":1`)
-}
-
-// parseQuickAnswerResult 解析 QuickAnswer 返回值，返回 (是否成功, 消息文本)
-func parseQuickAnswerResult(rawResult string) (isSuccess bool, msg string, isFinal bool) {
-	isSuccess = false
-	msg = rawResult
-
-	var res struct {
-		Result   int             `json:"result"`
-		Msg      string          `json:"msg"`
-		ErrorMsg string          `json:"errorMsg"`
-		Data     json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(rawResult), &res); err == nil {
-		if res.ErrorMsg != "" {
-			msg = res.ErrorMsg
-		} else if res.Msg != "" {
-			msg = res.Msg
-		}
-		if res.Result == 1 {
-			if string(res.Data) == "1" {
-				msg = "抢答人数已达上限"
-			} else {
-				isSuccess = true
-			}
-		}
-	} else {
-		lower := strings.ToLower(rawResult)
-		isSuccess = strings.Contains(lower, "抢答成功") || strings.Contains(lower, "success") || strings.Contains(rawResult, `"result":1`)
-	}
-
-	lowerMsg := strings.ToLower(msg)
-	isFinal = isSuccess ||
-		strings.Contains(lowerMsg, "已过期") ||
-		strings.Contains(lowerMsg, "已结束") ||
-		strings.Contains(lowerMsg, "学生已抢答") ||
-		strings.Contains(lowerMsg, "已抢答") ||
-		strings.Contains(lowerMsg, "人数已达上限") ||
-		strings.Contains(lowerMsg, "已达上限")
-	return
-}
-
-// saveRecord 保存抢答记录到数据库
-func (s *QuizMonitorService) saveRecord(userUID, activityID int64, success bool, msg string) {
+func (s *QuizService) saveRecord(userUID, activityID int64, success bool, msg string) {
 	rec := &model.QuizRecord{
 		UserUID:    userUID,
 		ActivityID: activityID,
@@ -568,148 +528,475 @@ func (s *QuizMonitorService) saveRecord(userUID, activityID int64, success bool,
 	s.db.Create(rec)
 }
 
-// speculativeAnswer 预发抢答
-func (s *QuizMonitorService) speculativeAnswer(instance *MonitorInstance, mobile, password string, cfg *model.QuizConfig, activeID int64, startTime int64, name, courseName string) {
-	delay := startTime - time.Now().UnixMilli()
-	if delay > 30 {
-		return
+// saveActivity 保存抢答活动到数据库（供活动列表展示）
+func (s *QuizService) saveActivity(userUID, courseID, classID int64, act xxt.Active) {
+	// 查询课程名称
+	courseName := ""
+	var course struct{ Name string }
+	if err := s.db.Table("courses").
+		Select("name").
+		Where("course_id = ? AND class_id = ?", courseID, classID).
+		Take(&course).Error; err == nil {
+		courseName = course.Name
 	}
 
-	log.Printf("[QuizMonitor] 🚀 预发抢答: uid=%d active=%d name=%s", instance.UserUID, activeID, name)
+	activity := &model.QuizActivity{
+		UserUID:    userUID,
+		ActivityID: act.ActiveID,
+		CourseID:   courseID,
+		ClassID:    classID,
+		Title:      act.Name,
+		CourseName: courseName,
+		StartTime:  act.StartTime,
+		EndTime:    act.EndTime,
+		Status:     act.Status,
+	}
+	s.db.Where("activity_id = ? AND user_uid = ?", act.ActiveID, userUID).
+		Assign(activity).
+		FirstOrCreate(activity)
+}
 
-	for attempt := 0; attempt < 25; attempt++ {
-		if !instance.Running {
-			return
-		}
-		if instance.isAnswered(activeID) {
-			return
+// ================= 清理 =================
+
+// checkAndPrepareActivity 检查活动状态，处理"等待学生就位"模式
+// 返回值:
+//   (result, nil) → 需要提前返回（已抢答/人数满/已结束）
+//   (nil, nil)    → 正常，继续执行抢答
+//   (nil, err)    → 错误，终止
+func (s *QuizService) checkAndPrepareActivity(cctx context.Context, userCtx *UserContext, userUID, activeID, courseID, classID int64) (*AnswerResult, error) {
+	// 获取活动详情（含抢答状态）
+	attendInfo, err := s.xxtClient.GetAnswerAttendInfo(userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID, activeID)
+	if err != nil {
+		// 获取失败不阻塞抢答（降级：直接尝试 QuickAnswer）
+		log.Printf("[Quiz] ⚠ 获取活动详情失败（降级）: uid=%d active=%d err=%v", userUID, activeID, err)
+		return nil, nil
+	}
+
+	// 已抢答
+	if attendInfo.AlreadyAnswered() {
+		log.Printf("[Quiz] ⏭ 已抢答过: uid=%d active=%d", userUID, activeID)
+		return &AnswerResult{
+			Success:    false,
+			Message:    "您已抢答过了",
+			ActivityID: activeID,
+		}, fmt.Errorf("您已抢答过了")
+	}
+
+	// 人数已满
+	if attendInfo.IsAnswerFull() {
+		log.Printf("[Quiz] ⏭ 人数已满: uid=%d active=%d", userUID, activeID)
+		return nil, fmt.Errorf("抢答人数已达上限")
+	}
+
+	// 已结束
+	if attendInfo.IsEnded() {
+		log.Printf("[Quiz] ⏭ 已结束: uid=%d active=%d", userUID, activeID)
+		return nil, fmt.Errorf("抢答已结束")
+	}
+
+	// 等待学生就位模式
+	if attendInfo.NeedWaitForReady() {
+		log.Printf("[Quiz] 🔄 等待学生就位模式: uid=%d active=%d 执行准备...", userUID, activeID)
+
+		// 广播准备状态
+		s.broadcast(userUID, MonitorEvent{
+			Type:       EventStatus,
+			ActivityID: activeID,
+			Success:    false,
+			Message:    "正在准备就位...",
+		})
+
+		// 调用 StuAnswerPrepare
+		_, prepErr := s.xxtClient.StuAnswerPrepare(userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID, activeID)
+		if prepErr != nil {
+			return nil, fmt.Errorf("准备就位失败: %v", prepErr)
 		}
 
-		result, err := s.xxtClient.QuickAnswer(mobile, password, cfg.CourseID, cfg.ClassID, activeID)
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
+		// 广播准备完成
+		s.broadcast(userUID, MonitorEvent{
+			Type:       EventStatus,
+			ActivityID: activeID,
+			Success:    false,
+			Message:    "已就位，等待教师开启抢答...",
+		})
+
+		// 轮询 GetTeacherIfOpenAnswer（最多 30s）
+		pollStart := time.Now()
+		timeout := 30 * time.Second
+		for time.Since(pollStart) < timeout {
+			select {
+			case <-cctx.Done():
+				log.Printf("[Quiz] ⏰ 用户已断开，停止等待教师开启: uid=%d active=%d", userUID, activeID)
+				return nil, fmt.Errorf("用户已取消")
+			case <-time.After(1 * time.Second):
+			}
+			isOpen, pollErr := s.xxtClient.GetTeacherIfOpenAnswer(userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID, activeID)
+			if pollErr == nil && isOpen {
+				log.Printf("[Quiz] ✅ 教师已开启抢答: uid=%d active=%d 耗时=%.0fs",
+					userUID, activeID, time.Since(pollStart).Seconds())
+				return nil, nil // 教师已开启，继续执行抢答
+			}
+		}
+
+		// 超时
+		log.Printf("[Quiz] ⏰ 等待教师开启超时: uid=%d active=%d", userUID, activeID)
+		return nil, fmt.Errorf("等待教师开启抢答超时（30s）")
+	}
+
+	return nil, nil // 普通模式，继续执行
+}
+
+// QuickAnswerAll 一键批量抢答：检测当前所有进行中的抢答活动并全部抢答
+// 10s 防重复提交，每个活动之间 ±50ms 抖动
+// GetUserActivityIDs 获取用户已处理过的活动ID列表（用于初始化监测去重集合）
+func (s *QuizService) GetUserActivityIDs(userUID int64) ([]int64, error) {
+	var ids []int64
+	err := s.db.Model(&model.QuizRecord{}).
+		Where("user_uid = ?", userUID).
+		Pluck("activity_id", &ids).Error
+	return ids, err
+}
+
+func (s *QuizService) QuickAnswerAll(userUID int64) (*BatchAnswerResult, error) {
+	// 1. 10s 防重复提交
+	s.oneClickCooldownsMu.Lock()
+	if until, exists := s.oneClickCooldowns[userUID]; exists && time.Now().Before(until) {
+		remaining := until.Sub(time.Now()).Seconds()
+		s.oneClickCooldownsMu.Unlock()
+		return nil, fmt.Errorf("请稍后再试（剩余 %.0fs）", remaining)
+	}
+	s.oneClickCooldowns[userUID] = time.Now().Add(10 * time.Second)
+	s.oneClickCooldownsMu.Unlock()
+
+	startTime := time.Now()
+
+	// 2. 获取用户上下文
+	userCtx := s.ensureUserContext(userUID)
+	if userCtx == nil {
+		return nil, fmt.Errorf("获取用户信息失败")
+	}
+	if userCtx.config.CourseID == 0 || userCtx.config.ClassID == 0 {
+		return nil, fmt.Errorf("请先在设置中配置课程")
+	}
+
+	// 3. 从超星拉取当前活动列表
+	actives, err := s.xxtClient.GetActivesAllFast(userCtx.cachedMobile, userCtx.cachedPassword, userCtx.config.CourseID, userCtx.config.ClassID)
+	if err != nil {
+		return nil, fmt.Errorf("获取活动列表失败: %v", err)
+	}
+
+	// 4. 过滤出抢答类活动
+	batch := &BatchAnswerResult{
+		Details: make([]*AnswerResult, 0),
+	}
+	var quizActives []xxt.Active
+	for _, act := range actives {
+		if !xxt.IsQuizActivity(act.Name) && !xxt.IsQuizActivityByType(act.ActiveType) {
+			continue
+		}
+		// 只抢答进行中的活动（status=1），跳过待开始(0)和已结束(2)
+		if act.Status != 1 {
+			continue
+		}
+		quizActives = append(quizActives, act)
+	}
+	batch.Total = len(quizActives)
+
+	if batch.Total == 0 {
+		batch.Elapsed = time.Since(startTime).Milliseconds()
+		return batch, nil
+	}
+
+	// 5. 遍历每个活动，执行抢答
+	for i, act := range quizActives {
+		// 每个活动之间 ±50ms 抖动
+		if i > 0 {
+			jitter := time.Duration(50 + rand.Intn(50)) * time.Millisecond
+			time.Sleep(jitter)
+		}
+
+		answerStart := time.Now()
+
+		// 检查活动状态
+		_, prepErr := s.checkAndPrepareActivity(context.Background(), userCtx, userUID, act.ActiveID, userCtx.config.CourseID, userCtx.config.ClassID)
+		if prepErr != nil {
+			skipResult := &AnswerResult{
+				Success:    false,
+				Message:    prepErr.Error(),
+				ElapsedMs:  time.Since(answerStart).Milliseconds(),
+				ActivityID: act.ActiveID,
+			}
+			batch.Details = append(batch.Details, skipResult)
+			batch.Skipped++
 			continue
 		}
 
-		isSuccess, msg, isFinal := parseQuickAnswerResult(result)
-
-		if isSuccess || isFinal {
-			if !instance.isAnswered(activeID) {
-				instance.markAnswered(activeID)
-				s.broadcast(instance.UserUID, MonitorEvent{
-					Type:       EventDetected,
-					ActivityID: activeID,
-					Name:       name,
-					CourseName: courseName,
-					Message:    fmt.Sprintf("%d,%d,%d", 0, 0, 1),
-				})
-				s.broadcast(instance.UserUID, MonitorEvent{
-					Type:       EventAnswered,
-					ActivityID: activeID,
-					Name:       name,
-					CourseName: courseName,
-					Success:    isSuccess,
-					Message:    msg,
-					Elapsed:    time.Now().UnixMilli() - startTime,
-				})
-				s.saveRecord(instance.UserUID, activeID, isSuccess, msg)
-				if isSuccess {
-					instance.lastAnswerTime = time.Now().UnixMilli()
-					log.Printf("[QuizMonitor] ✅ 预发抢答成功: uid=%d active=%d msg=%s", instance.UserUID, activeID, msg)
-				} else {
-					log.Printf("[QuizMonitor] ⏭ 预发抢答终态: uid=%d active=%d msg=%s", instance.UserUID, activeID, msg)
-				}
+		// 执行抢答（不加延迟，直接提交）
+		result, execErr := s.executeAnswer(context.Background(), userCtx, userUID, act.ActiveID, userCtx.config.CourseID, userCtx.config.ClassID, 0)
+		if execErr != nil && result == nil {
+			failResult := &AnswerResult{
+				Success:    false,
+				Message:    execErr.Error(),
+				ElapsedMs:  time.Since(answerStart).Milliseconds(),
+				ActivityID: act.ActiveID,
 			}
-			return
+			batch.Details = append(batch.Details, failResult)
+			batch.Failed++
+			continue
 		}
+		if result == nil {
+			result = &AnswerResult{
+				Success:    false,
+				Message:    "未知错误",
+				ElapsedMs:  time.Since(answerStart).Milliseconds(),
+				ActivityID: act.ActiveID,
+			}
+		}
+		batch.Details = append(batch.Details, result)
+		if result.Success {
+			batch.Success++
+		} else {
+			batch.Failed++
+		}
+	}
 
-		time.Sleep(100 * time.Millisecond)
+	batch.Elapsed = time.Since(startTime).Milliseconds()
+	return batch, nil
+}
+
+// Shutdown 清理订阅者
+func (s *QuizService) Shutdown() {
+	log.Printf("[Quiz] 清理订阅者...")
+	s.subMu.Lock()
+	for uid, subs := range s.subscribers {
+		for _, sub := range subs {
+			close(sub.ch)
+		}
+		delete(s.subscribers, uid)
+	}
+	s.subMu.Unlock()
+}
+
+// ==================== QuizMonitor 定义 ====================
+
+// QuizMonitor 管理每位用户的预热和抢答
+// 预热(PreWarm)：保持凭证缓存和超星 session 在线（WS 连接时自动启动）
+// 抢答：用户点击一键抢答时强制拉取最新活动并执行抢答，完成后回到预热状态
+type QuizMonitor struct {
+	svc    *QuizService
+	xxtCli *xxt.Client
+
+	mu    sync.Mutex
+	users map[int64]*userMonitorState // userUID → 状态
+}
+
+// NewQuizMonitor 创建监控管理器
+func NewQuizMonitor(svc *QuizService, xxtCli *xxt.Client) *QuizMonitor {
+	return &QuizMonitor{
+		svc:    svc,
+		xxtCli: xxtCli,
+		users:  make(map[int64]*userMonitorState),
 	}
 }
 
-func (s *QuizMonitorService) lookupCourseName(instance *MonitorInstance) string {
-	if instance.cachedCourseName != "" {
-		return instance.cachedCourseName
+// StartPreWarm 启动预热：保持凭证缓存和超星 session 在线
+// 不轮询活动列表，仅在用户点击一键抢答时强制拉取最新数据
+func (qm *QuizMonitor) StartPreWarm(userUID int64, mobile, password string, courseID, classID int64) {
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+
+	if state, exists := qm.users[userUID]; exists {
+		// 更新凭证，无需重启 goroutine
+		state.mobile = mobile
+		state.password = password
+		state.courseID = courseID
+		state.classID = classID
+		return
 	}
-	var course mainmodel.Course
-	if err := s.db.Where("course_id = ? AND class_id = ?",
-		instance.Config.CourseID, instance.Config.ClassID).
-		First(&course).Error; err == nil {
-		instance.cachedCourseName = course.Name
-		return course.Name
+
+	// 全新启动预热
+	ctx, cancel := context.WithCancel(context.Background())
+	qm.users[userUID] = &userMonitorState{
+		cancel:   cancel,
+		mode:     MonitorPreWarm,
+		mobile:   mobile,
+		password: password,
+		courseID: courseID,
+		classID:  classID,
 	}
-	return ""
+	qm.mu.Unlock()
+	go qm.preWarmLoop(ctx, userUID, mobile, password, courseID, classID)
+	qm.mu.Lock()
 }
 
-func (s *QuizMonitorService) GetConfig(userUID int64) (*model.QuizConfig, error) {
-	config := &model.QuizConfig{}
-	err := s.db.Where("user_uid = ?", userUID).First(config).Error
-	if err == gorm.ErrRecordNotFound {
-		return &model.QuizConfig{
-			UserUID:    userUID,
-			Enabled:    false,
-			AutoAnswer: true,
-			DelayMs:    0,
-			WSEnabled:  true,
-		}, nil
+// StartPreWarmFromDB 从数据库加载凭证后启动预热（WS 连接时自动调用）
+func (qm *QuizMonitor) StartPreWarmFromDB(userUID int64, courseID, classID int64) {
+	config, err := qm.svc.GetConfig(userUID)
+	if err != nil || config == nil {
+		return
 	}
-	return config, err
+	if courseID == 0 {
+		courseID = config.CourseID
+	}
+	if classID == 0 {
+		classID = config.ClassID
+	}
+	if courseID == 0 || classID == 0 {
+		return // 未配置课程，跳过预热
+	}
+
+	userCtx := qm.svc.ensureUserContext(userUID)
+	if userCtx == nil {
+		return
+	}
+
+	qm.StartPreWarm(userUID, userCtx.cachedMobile, userCtx.cachedPassword, courseID, classID)
 }
 
-func (s *QuizMonitorService) UpdateConfig(userUID int64, config *model.QuizConfig) error {
-	existing := &model.QuizConfig{}
-	err := s.db.Where("user_uid = ?", userUID).First(existing).Error
-	if err == gorm.ErrRecordNotFound {
-		config.UserUID = userUID
-		return s.db.Create(config).Error
+// OneClickAnswer 一键抢答：检测进行中的抢答活动 → 异步执行抢答
+// 返回检测到的活动数量（同步返回，抢答结果通过 WS 推送）
+// 缓存优先：预热已缓存的活动列表可直接读取（毫秒级响应）
+// 缓存为空时自动降级为强制刷新
+func (qm *QuizMonitor) OneClickAnswer(userUID int64, mobile, password string, courseID, classID int64) (int, error) {
+	qm.StartPreWarm(userUID, mobile, password, courseID, classID)
+
+	// 同步检测当前活动（缓存优先，空时自动强制刷新）
+	detected := qm.detectActivities(userUID, mobile, password, courseID, classID)
+	if len(detected) == 0 {
+		return 0, nil
 	}
-	existing.Enabled = config.Enabled
-	existing.AutoAnswer = config.AutoAnswer
-	existing.DelayMs = config.DelayMs
-	existing.WSEnabled = config.WSEnabled
-	if config.WSUrl != "" {
-		existing.WSUrl = config.WSUrl
-	}
-	if config.CourseID > 0 {
-		existing.CourseID = config.CourseID
-	}
-	if config.ClassID > 0 {
-		existing.ClassID = config.ClassID
-	}
-	if config.MonitorCourses != "" {
-		existing.MonitorCourses = config.MonitorCourses
-	}
-	return s.db.Save(existing).Error
+
+	// 异步执行抢答（结果通过 WS 推送）
+	go qm.answerActivities(userUID, mobile, password, courseID, classID, detected)
+	return len(detected), nil
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+// detectActivities 检测当前进行中的抢答活动
+// 策略：先读缓存（预热保持的）→ 有结果直接返回（毫秒级）
+//       缓存为空或无结果 → 强制刷新（绕过退避）→ 再试一次
+func (qm *QuizMonitor) detectActivities(userUID int64, mobile, password string, courseID, classID int64) []xxt.Active {
+	// 第一优先：从缓存读取（预热已保持最新）
+	actives, err := qm.xxtCli.GetActivesAllFast(mobile, password, courseID, classID)
+	if err != nil || len(actives) == 0 {
+		// 缓存为空 → 强制刷新（绕过风控退避）
+		actives, err = qm.xxtCli.GetActivesAllForce(mobile, password, courseID, classID)
+		if err != nil || len(actives) == 0 {
+			return nil
+		}
 	}
-	return s[:maxLen] + "..."
+
+	seen := make(map[int64]bool)
+	records, err := qm.svc.GetUserActivityIDs(userUID)
+	if err == nil {
+		for _, id := range records {
+			seen[id] = true
+		}
+	}
+
+	var detected []xxt.Active
+	now := time.Now().UnixMilli()
+	for _, act := range actives {
+		if !xxt.IsQuizActivity(act.Name) && !xxt.IsQuizActivityByType(act.ActiveType) {
+			continue
+		}
+		if act.Status != 1 {
+			continue
+		}
+		if act.EndTime > 0 && now >= act.EndTime {
+			continue
+		}
+		if seen[act.ActiveID] {
+			continue
+		}
+		detected = append(detected, act)
+	}
+
+	// 如果缓存有数据但没检测到有效活动，尝试强制刷新一次（防止缓存过期）
+	if len(detected) == 0 {
+		forceActives, forceErr := qm.xxtCli.GetActivesAllForce(mobile, password, courseID, classID)
+		if forceErr == nil && len(forceActives) > 0 {
+			now = time.Now().UnixMilli()
+			for _, act := range forceActives {
+				if !xxt.IsQuizActivity(act.Name) && !xxt.IsQuizActivityByType(act.ActiveType) {
+					continue
+				}
+				if act.Status != 1 {
+					continue
+				}
+				if act.EndTime > 0 && now >= act.EndTime {
+					continue
+				}
+				if seen[act.ActiveID] {
+					continue
+				}
+				detected = append(detected, act)
+			}
+		}
+	}
+
+	return detected
 }
 
-// isAnswered 并发安全地检查活动是否已处理
-func (m *MonitorInstance) isAnswered(activeID int64) bool {
-	m.muAnswered.Lock()
-	defer m.muAnswered.Unlock()
-	return m.answered[activeID]
+// answerActivities 异步执行抢答（结果通过 WS 推送）
+func (qm *QuizMonitor) answerActivities(userUID int64, _, _ string, courseID, classID int64, detected []xxt.Active) {
+	for _, act := range detected {
+		// 保存活动到数据库（供活动列表展示）
+		qm.svc.saveActivity(userUID, courseID, classID, act)
+
+		log.Printf("[QuizMonitor] 检测到活动并抢答: uid=%d active=%d name=%s", userUID, act.ActiveID, act.Name)
+		BroadcastQuizActivity(userUID, MonitorEvent{
+			Type:       EventDetected,
+			ActivityID: act.ActiveID,
+			Name:       act.Name,
+			Success:    false,
+			Message:    "检测到抢答活动",
+		})
+
+		result, err := qm.svc.ManualQuickAnswer(context.Background(), userUID, act.ActiveID, courseID, classID)
+		if err != nil {
+			log.Printf("[QuizMonitor] 抢答失败: uid=%d active=%d err=%v", userUID, act.ActiveID, err)
+		} else {
+			log.Printf("[QuizMonitor] 抢答成功: uid=%d active=%d elapsed=%dms", userUID, act.ActiveID, result.ElapsedMs)
+		}
+	}
 }
 
-// markAnswered 并发安全地标记活动为已处理
-func (m *MonitorInstance) markAnswered(activeID int64) {
-	m.muAnswered.Lock()
-	m.answered[activeID] = true
-	m.muAnswered.Unlock()
+// Stop 停止所有（完全停止，同 FullStop）
+func (qm *QuizMonitor) Stop(userUID int64) {
+	qm.FullStop(userUID)
 }
 
-func ParseMonitorCourses(coursesJSON string) []int64 {
-	if coursesJSON == "" {
-		return []int64{}
+// FullStop 完全停止（WS 断开时调用）
+func (qm *QuizMonitor) FullStop(userUID int64) {
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+
+	if state, exists := qm.users[userUID]; exists {
+		state.cancel()
+		delete(qm.users, userUID)
+		log.Printf("[QuizMonitor] 已完全停止: uid=%d", userUID)
 	}
-	var courses []int64
-	if err := json.Unmarshal([]byte(coursesJSON), &courses); err != nil {
-		return []int64{}
+}
+
+// StopAll 停止所有
+func (qm *QuizMonitor) StopAll() {
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+
+	for uid, state := range qm.users {
+		state.cancel()
+		delete(qm.users, uid)
 	}
-	return courses
+	log.Printf("[QuizMonitor] 已停止全部监控")
+}
+
+// GetMode 获取当前模式（MonitorOff 或 MonitorPreWarm）
+func (qm *QuizMonitor) GetMode(userUID int64) int {
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+
+	if state, exists := qm.users[userUID]; exists {
+		return state.mode
+	}
+	return MonitorOff
 }

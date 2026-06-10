@@ -115,13 +115,6 @@ export function useLocationPanel(options: UseLocationPanelOptions = {}) {
       return cached.position;
     }
 
-    // 2. 检查百度地图 AK 是否已配置
-    if (!hasBMapKey()) {
-      toast.error('请先在地址库面板中配置百度地图 API Key', { duration: 4000 });
-      setIsLocating(false);
-      return null;
-    }
-
     setIsLocating(true);
     setGeoAddress(null);
     setLocateSuccess(false);
@@ -168,13 +161,7 @@ export function useLocationPanel(options: UseLocationPanelOptions = {}) {
 
       return pos;
     } catch (err: any) {
-      // 检查是否因为 AK 问题导致
-      const msg = err.message || '';
-      if (msg.includes('AK') || msg.includes('key') || msg.includes('Key')) {
-        toast.error('百度地图 Key 可能无效，请在地址库面板中重新配置', { duration: 5000 });
-      } else {
-        toast.error('定位失败: ' + msg);
-      }
+      toast.error('定位失败: ' + (err.message || '未知错误'));
       return null;
     } finally {
       setIsLocating(false);

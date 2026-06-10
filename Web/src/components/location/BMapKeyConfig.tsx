@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { KeyRound, CheckCircle2, XCircle, ExternalLink, Loader2, Eye, EyeOff, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { KeyRound, CheckCircle2, XCircle, ExternalLink, Loader2, Eye, EyeOff, RefreshCw, ChevronDown, ChevronUp, MapPin } from 'lucide-react';
 import { useBMapKey } from '../../hooks/useBMapKey';
 
 interface BMapKeyConfigProps {
@@ -58,7 +58,8 @@ const BMapKeyConfig: React.FC<BMapKeyConfigProps> = ({ compact = false, fullWidt
     await clear();
     setKeyInput('');
     setTestResult('idle');
-    setExpanded(true);
+    // 清除后自动收起，默认使用浏览器 GPS 定位
+    setExpanded(false);
   };
 
   // ---- 紧凑状态按钮 ----
@@ -71,17 +72,17 @@ const BMapKeyConfig: React.FC<BMapKeyConfigProps> = ({ compact = false, fullWidt
           style={{
             background: configured
               ? 'linear-gradient(135deg, rgba(0,180,42,0.12), rgba(54,211,153,0.08))'
-              : 'linear-gradient(135deg, rgba(245,63,63,0.12), rgba(251,146,60,0.08))',
-            color: configured ? '#00B42A' : '#F53F3F',
+              : 'linear-gradient(135deg, rgba(51,136,255,0.1), rgba(54,211,153,0.06))',
+            color: configured ? '#00B42A' : '#3388ff',
             boxShadow: configured
               ? '0 0 12px rgba(0,180,42,0.15)'
-              : '0 0 12px rgba(245,63,63,0.12)',
+              : '0 0 12px rgba(51,136,255,0.1)',
           }}
-          title={configured ? '百度地图 Key 已配置，点击修改' : '未配置百度地图 Key，点击设置'}
+          title={configured ? '百度地图 Key 已配置，点击修改' : '使用浏览器 GPS 定位（点击配置百度地图 Key）'}
         >
           <span className="relative flex h-2 w-2">
-            <span className={`absolute inline-flex h-full w-full rounded-full ${configured ? 'bg-green-400' : 'bg-red-400'} opacity-75 ${configured ? '' : 'animate-ping'}`} />
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${configured ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className={`absolute inline-flex h-full w-full rounded-full ${configured ? 'bg-green-400' : 'bg-blue-400'} opacity-75 ${configured ? '' : 'animate-ping'}`} />
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${configured ? 'bg-green-500' : 'bg-blue-500'}`} />
           </span>
           <span>Key</span>
         </button>
@@ -181,59 +182,72 @@ const BMapKeyConfig: React.FC<BMapKeyConfigProps> = ({ compact = false, fullWidt
             </AnimatePresence>
           </motion.div>
         ) : (
-          /* ---- 未配置：突出显示配置引导 ---- */
+          /* ---- 未配置：信息提示风格（不阻断浏览器 GPS 定位） ---- */
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative overflow-hidden rounded-2xl border-2 p-5"
+            className="relative overflow-hidden rounded-2xl border p-4"
             style={{
-              background: 'linear-gradient(135deg, rgba(245,63,63,0.04), rgba(251,146,60,0.03), rgba(255,255,255,0.8))',
-              borderColor: 'rgba(245,63,63,0.2)',
-              boxShadow: '0 4px 20px rgba(245,63,63,0.06)',
+              background: 'rgba(248,250,252,0.9)',
+              borderColor: 'rgba(51,136,255,0.15)',
             }}
           >
-            {/* 装饰性背景元素 */}
-            <div className="absolute top-0 right-0 w-32 h-32 rounded-full -mr-12 -mt-12 pointer-events-none opacity-30"
-              style={{ background: 'radial-gradient(circle, rgba(245,63,63,0.15), transparent 70%)' }} />
-            <div className="absolute bottom-0 left-0 w-24 h-24 rounded-full -ml-8 -mb-8 pointer-events-none opacity-20"
-              style={{ background: 'radial-gradient(circle, rgba(251,146,60,0.15), transparent 70%)' }} />
-
-            <div className="relative space-y-4">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shrink-0"
-                  style={{
-                    background: 'linear-gradient(135deg, #F53F3F, #FB923C)',
-                    boxShadow: '0 4px 16px rgba(245,63,63,0.3)',
-                  }}>
-                  <KeyRound size={20} className="text-white" strokeWidth={2.5} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="text-sm font-extrabold text-text-primary">配置百度地图 API Key</h4>
-                    <span className="text-[9px] px-2 py-0.5 rounded-md font-bold whitespace-nowrap"
-                      style={{ background: 'rgba(245,63,63,0.1)', color: '#F53F3F' }}>
-                      必填
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
-                    地图选点、自动定位、逆地理编码功能需要百度地图 API Key 才能正常使用
-                  </p>
-                </div>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm"
+                style={{
+                  background: 'linear-gradient(135deg, #3388ff, #36D399)',
+                  boxShadow: '0 2px 8px rgba(51,136,255,0.2)',
+                }}>
+                <MapPin size={18} className="text-white" />
               </div>
-
-              <InlineKeyInput
-                keyInput={keyInput}
-                setKeyInput={setKeyInput}
-                showKey={showKey}
-                setShowKey={setShowKey}
-                saving={saving}
-                configured={configured}
-                testResult={testResult}
-                onSave={handleSave}
-                onClear={handleClear}
-                inputRef={inputRef}
-              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-sm font-bold text-text-primary">浏览器 GPS 定位已就绪</h4>
+                  <span className="text-[9px] px-2 py-0.5 rounded-md font-bold whitespace-nowrap"
+                    style={{ background: 'rgba(51,136,255,0.1)', color: '#3388ff' }}>
+                    GPS
+                  </span>
+                </div>
+                <p className="text-[10px] text-text-muted mt-0.5 leading-relaxed">
+                  下方「获取定位」使用浏览器 GPS 定位。配置百度地图 Key 可开启地图选点和地址解析
+                </p>
+              </div>
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all active:scale-90 shrink-0 mt-0.5"
+                style={{ color: '#64748B', background: 'rgba(241,245,249,0.8)' }}
+              >
+                {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {expanded ? '收起' : '配置'}
+              </button>
             </div>
+
+            <AnimatePresence>
+              {expanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-3 mt-3 border-t space-y-3"
+                    style={{ borderColor: 'rgba(226,232,240,0.5)' }}>
+                    <InlineKeyInput
+                      keyInput={keyInput}
+                      setKeyInput={setKeyInput}
+                      showKey={showKey}
+                      setShowKey={setShowKey}
+                      saving={saving}
+                      configured={configured}
+                      testResult={testResult}
+                      onSave={handleSave}
+                      onClear={handleClear}
+                      inputRef={inputRef}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </div>
@@ -250,13 +264,13 @@ const BMapKeyConfig: React.FC<BMapKeyConfigProps> = ({ compact = false, fullWidt
           style={{
             background: configured
               ? 'linear-gradient(135deg, rgba(0,180,42,0.1), rgba(54,211,153,0.06))'
-              : 'linear-gradient(135deg, rgba(245,63,63,0.1), rgba(251,146,60,0.06))',
-            color: configured ? '#00B42A' : '#F53F3F',
+              : 'linear-gradient(135deg, rgba(51,136,255,0.08), rgba(54,211,153,0.04))',
+            color: configured ? '#00B42A' : '#3388ff',
           }}
         >
           <span className="relative flex h-2 w-2">
-            <span className={`absolute inline-flex h-full w-full rounded-full ${configured ? 'bg-green-400' : 'bg-red-400'} opacity-75 ${configured ? '' : 'animate-ping'}`} />
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${configured ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className={`absolute inline-flex h-full w-full rounded-full ${configured ? 'bg-green-400' : 'bg-blue-400'} opacity-75 ${configured ? '' : 'animate-ping'}`} />
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${configured ? 'bg-green-500' : 'bg-blue-500'}`} />
           </span>
           百度地图 {configured ? '已配置' : '未配置'}
         </button>

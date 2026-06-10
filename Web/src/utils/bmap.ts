@@ -7,7 +7,10 @@
  *   3. 调用 initBMap() 初始化（自动动态加载 SDK）
  *   4. 使用 getCurrentPosition() / reverseGeocode() 等函数
  *
- * 无 SDK 时所有函数降级为浏览器原生 API，不会报错。
+ * 行为模式：
+ *   - 已配置有效 Key + SDK 已加载 → 百度地图定位（BD-09 坐标 + 地址解析）
+ *   - 未配置 Key 或 SDK 未加载 → 降级使用浏览器原生 GPS（WGS-84 坐标）
+ *   删除 Key 后自动降级，无需刷新页面。
  *
  * 百度地图坐标拾取工具：https://lbs.baidu.com/maptool/getpoint
  */
@@ -16,10 +19,30 @@
 const STORAGE_KEY = 'baidu_map_key';
 
 /**
+ * 常见的占位符/示例值列表（不视为有效 Key）
+ */
+const PLACEHOLDER_KEYS = [
+  'your_baidu_map_key',
+  'your_baidu_map_api_key',
+  'your_key_here',
+  'baidu_map_key',
+];
+
+function isValidKey(key: string): boolean {
+  const k = key.trim().toLowerCase();
+  return k.length > 0 && !PLACEHOLDER_KEYS.includes(k) && k !== 'your' && k !== 'ak';
+}
+
+/**
  * 获取百度地图 API Key，优先级：localStorage > .env
+ * 会自动过滤占位符值，返回空字符串代表未配置
  */
 export function getBMapKey(): string {
-  return localStorage.getItem(STORAGE_KEY) || import.meta.env.VITE_BAIDU_MAP_KEY || '';
+  const fromStorage = localStorage.getItem(STORAGE_KEY);
+  if (fromStorage && isValidKey(fromStorage)) return fromStorage;
+  const fromEnv = import.meta.env.VITE_BAIDU_MAP_KEY || '';
+  if (fromEnv && isValidKey(fromEnv)) return fromEnv;
+  return '';
 }
 
 /**
@@ -143,7 +166,7 @@ function loadBMapScript(): Promise<boolean> {
     script.src = `https://api.map.baidu.com/api?v=3.0&ak=${encodeURIComponent(key)}&callback=${callbackName}`;
     script.onerror = () => {
       delete (w as any)[callbackName];
-      console.warn('[BMap] SDK 加载失败，降级为浏览器定位');
+      console.warn('[BMap] SDK 加载失败，请检查 API Key 是否正确');
       resolve(false);
     };
     document.head.appendChild(script);
@@ -169,7 +192,7 @@ export async function initBMap(): Promise<boolean> {
       console.log('[BMap] 初始化成功');
       return true;
     } catch (e) {
-      console.warn('[BMap] 初始化失败，降级为浏览器定位', e);
+      console.warn('[BMap] 初始化失败', e);
       return false;
     }
   })();
@@ -179,14 +202,13 @@ export async function initBMap(): Promise<boolean> {
 
 /**
  * 将 GPS (WGS-84) 坐标转换为百度 (BD-09) 坐标
- * 内部使用 BMap.Convertor
+ * 内部使用 BMap.Convertor，失败时返回 null（不阻断流程）
  */
-function gpsToBaidu(lat: number, lng: number): Promise<{ lat: number; lng: number }> {
+function gpsToBaidu(lat: number, lng: number): Promise<{ lat: number; lng: number } | null> {
   return new Promise((resolve) => {
     const w = window as any;
     if (!bmapLoaded || !w.BMap || !w.BMap.Convertor) {
-      // 无法转换，直接返回原坐标
-      resolve({ lat, lng });
+      resolve(null);
       return;
     }
 
@@ -197,20 +219,24 @@ function gpsToBaidu(lat: number, lng: number): Promise<{ lat: number; lng: numbe
         if (data && data.points && data.points.length > 0) {
           resolve({ lat: data.points[0].lat, lng: data.points[0].lng });
         } else {
-          resolve({ lat, lng });
+          resolve(null);
         }
       });
     } catch {
-      resolve({ lat, lng });
+      resolve(null);
     }
   });
 }
 
 /**
- * 获取当前位置（浏览器 GPS → 转换为 BD-09）
+ * 获取当前位置
+ *
+ * 行为：
+ *   - 已配置 Key + 百度 SDK 已加载 → 获取 GPS 并转换为 BD-09 坐标
+ *   - 未配置 Key 或 SDK 未加载 → 获取浏览器原生 GPS（WGS-84，降级模式）
  */
 export async function getCurrentPosition(): Promise<BMapPosition> {
-  // 先获取浏览器原生 GPS (WGS-84)
+  // 获取浏览器原生 GPS (WGS-84)
   const rawPosition: { lat: number; lng: number; accuracy?: number } = await new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(new Error('浏览器不支持定位'));
@@ -223,13 +249,11 @@ export async function getCurrentPosition(): Promise<BMapPosition> {
     );
   });
 
-  // 尝试转换为 BD-09（百度坐标系）
+  // 尝试转换为 BD-09（百度坐标系），失败则使用原生坐标
   if (bmapLoaded) {
-    try {
-      const bdCoord = await gpsToBaidu(rawPosition.lat, rawPosition.lng);
+    const bdCoord = await gpsToBaidu(rawPosition.lat, rawPosition.lng);
+    if (bdCoord) {
       return { lat: bdCoord.lat, lng: bdCoord.lng, accuracy: rawPosition.accuracy };
-    } catch {
-      // 转换失败，使用原始坐标
     }
   }
 
@@ -238,7 +262,10 @@ export async function getCurrentPosition(): Promise<BMapPosition> {
 
 /**
  * 逆地理编码：坐标 → 地址（百度 BD-09 坐标系）
- * 降级时返回坐标字符串
+ *
+ * 行为：
+ *   - 百度 SDK 已加载 → 解析为结构化地址
+ *   - SDK 未加载 → 降级返回坐标字符串
  */
 export async function reverseGeocode(lat: number, lng: number): Promise<BMapAddress> {
   const w = window as any;

@@ -1,13 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,36 +24,31 @@ type QuizHandler struct {
 	db        *gorm.DB
 	xxtClient *xxt.Client
 	cc        *svc.CredentialCrypto
-	monitor   *quizsvc.QuizMonitorService
+	svc       *quizsvc.QuizService
 }
 
-func NewQuizHandler(db *gorm.DB, xxtClient *xxt.Client, cc *svc.CredentialCrypto, monitor *quizsvc.QuizMonitorService) *QuizHandler {
-	return &QuizHandler{db: db, xxtClient: xxtClient, cc: cc, monitor: monitor}
+func NewQuizHandler(db *gorm.DB, xxtClient *xxt.Client, cc *svc.CredentialCrypto, svc *quizsvc.QuizService) *QuizHandler {
+	return &QuizHandler{db: db, xxtClient: xxtClient, cc: cc, svc: svc}
 }
 
 // ================= 内部辅助函数 =================
 
 func getUserUID(c *gin.Context) int64 {
-	// 优先使用 common 包的标准 key（与 auth 中间件一致）
 	if uid := common.GetUserUID(c); uid != 0 {
 		return uid
 	}
-	// 兼容其他可能的 key 名
 	keys := []string{"uid", "user_id", "userID", "userId", "sub", "id"}
 	var val any
 	var exists bool
-
 	for _, key := range keys {
 		val, exists = c.Get(key)
 		if exists {
 			break
 		}
 	}
-
 	if !exists {
 		return 0
 	}
-
 	switch v := val.(type) {
 	case int64:
 		return v
@@ -79,7 +74,7 @@ func fail(c *gin.Context, httpCode int, msg string) {
 	c.JSON(httpCode, gin.H{"code": -1, "msg": msg, "data": nil})
 }
 
-// ================= 补全的路由方法 =================
+// ================= 配置管理 =================
 
 func (h *QuizHandler) GetConfig(c *gin.Context) {
 	uid := getUserUID(c)
@@ -87,7 +82,7 @@ func (h *QuizHandler) GetConfig(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "无法获取用户信息")
 		return
 	}
-	config, err := h.monitor.GetConfig(uid)
+	config, err := h.svc.GetConfig(uid)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "获取配置失败")
 		return
@@ -106,61 +101,52 @@ func (h *QuizHandler) UpdateConfig(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	if err := h.monitor.UpdateConfig(uid, &config); err != nil {
+	if err := h.svc.UpdateConfig(uid, &config); err != nil {
 		fail(c, http.StatusInternalServerError, "更新配置失败")
 		return
 	}
 	success(c, nil)
 }
 
-func (h *QuizHandler) StartMonitor(c *gin.Context) {
+// ================= 核心业务：一键抢答 =================
+
+// SubmitAnswer 手动一键抢答
+// 短延迟（≤1000ms）同步返回结果，长延迟异步通过 WS/SSE 推送
+func (h *QuizHandler) SubmitAnswer(c *gin.Context) {
 	uid := getUserUID(c)
 	if uid == 0 {
-		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+		fail(c, http.StatusInternalServerError, "系统错误：无法获取用户信息，请检查 JWT 配置")
 		return
 	}
 
-	// 读取前端传来的 course_id / class_id
 	var req struct {
-		CourseID int64 `json:"course_id"`
-		ClassID  int64 `json:"class_id"`
+		ActiveID        int64 `json:"active_id"`
+		ActivePrimaryID int64 `json:"activePrimaryId"`
+		CourseID        int64 `json:"course_id"`
+		ClassID         int64 `json:"class_id"`
 	}
-	c.ShouldBindJSON(&req) // 忽略错误，可能为空
-
-	// 如果请求体没传，尝试从已保存的配置中读取
-	if req.CourseID == 0 || req.ClassID == 0 {
-		cfg, _ := h.monitor.GetConfig(uid)
-		if cfg != nil {
-			req.CourseID = cfg.CourseID
-			req.ClassID = cfg.ClassID
-		}
-	}
-
-	if err := h.monitor.StartMonitor(uid, req.CourseID, req.ClassID); err != nil {
-		fail(c, http.StatusInternalServerError, "启动监控失败: "+err.Error())
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "参数错误: "+err.Error())
 		return
 	}
-	success(c, gin.H{"message": "监控已启动"})
-}
 
-func (h *QuizHandler) StopMonitor(c *gin.Context) {
-	uid := getUserUID(c)
-	if uid == 0 {
-		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+	activeID := req.ActivePrimaryID
+	if activeID == 0 {
+		activeID = req.ActiveID
+	}
+	if activeID == 0 || req.CourseID == 0 || req.ClassID == 0 {
+		fail(c, http.StatusBadRequest, "缺少必要参数 (active_id, course_id, class_id)")
 		return
 	}
-	h.monitor.StopMonitor(uid)
-	success(c, gin.H{"message": "监控已停止"})
-}
 
-func (h *QuizHandler) GetStatus(c *gin.Context) {
-	uid := getUserUID(c)
-	if uid == 0 {
-		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+	// 调用服务层执行抢答
+	result, err := h.svc.ManualQuickAnswer(context.Background(), uid, activeID, req.CourseID, req.ClassID)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	status := h.monitor.GetMonitorStatus(uid)
-	success(c, status)
+
+	success(c, result)
 }
 
 func (h *QuizHandler) GetActivities(c *gin.Context) {
@@ -205,7 +191,7 @@ func (h *QuizHandler) Events(c *gin.Context) {
 		return
 	}
 
-	ch, cancel := h.monitor.Subscribe(uid)
+	ch, cancel := h.svc.Subscribe(uid)
 	defer cancel()
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -213,7 +199,6 @@ func (h *QuizHandler) Events(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-	// SSE 心跳：每 15s 发送注释行，防止 nginx/cloudflare 超时断开
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 
@@ -227,7 +212,6 @@ func (h *QuizHandler) Events(c *gin.Context) {
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, string(data))
 			return true
 		case <-keepalive.C:
-			// SSE 协议心跳（注释行，客户端 EventSource 自动忽略）
 			fmt.Fprintf(w, ": keepalive\n\n")
 			return true
 		case <-c.Request.Context().Done():
@@ -236,7 +220,7 @@ func (h *QuizHandler) Events(c *gin.Context) {
 	})
 }
 
-// ================= WebSocket 实时推送（前端连接） =================
+// ================= WebSocket 实时推送 =================
 
 func (h *QuizHandler) WS(c *gin.Context) {
 	uid := getUserUID(c)
@@ -245,50 +229,132 @@ func (h *QuizHandler) WS(c *gin.Context) {
 		return
 	}
 
-	// 从 query param 提取课程信息
 	courseID, _ := strconv.ParseInt(c.Query("course_id"), 10, 64)
 	classID, _ := strconv.ParseInt(c.Query("class_id"), 10, 64)
 
-	// 升级 HTTP → WebSocket
 	conn, err := quizsvc.UpgradeWS(c.Writer, c.Request)
 	if err != nil {
 		log.Printf("[QuizWS] 升级失败: uid=%d err=%v", uid, err)
 		return
 	}
 
-	// 注册到 Hub（自动踢掉旧连接）
 	quizsvc.DefaultWSHub.Register(conn, uid, courseID, classID)
 }
 
-// ================= 核心业务接口 =================
+// ================= 统一抢答控制 =================
 
-func (h *QuizHandler) SubmitAnswer(c *gin.Context) {
+// ToggleMonitor 一键抢答：立即检测当前活动并执行抢答（一次性操作，无后台监控）
+// 检测结果通过 WS 实时推送
+// POST /api/quiz/one-click-answer
+func (h *QuizHandler) ToggleMonitor(c *gin.Context) {
 	uid := getUserUID(c)
 	if uid == 0 {
-		// ✅ 修复：改为 500，防止前端误判为 Token 过期
-		fail(c, http.StatusInternalServerError, "系统错误：无法获取用户信息，请检查 JWT 配置") 
-		return
-	}
-	
-	var req struct {
-		ActiveID        int64 `json:"active_id"`
-		ActivePrimaryID int64 `json:"activePrimaryId"`
-		CourseID        int64 `json:"course_id"`
-		ClassID         int64 `json:"class_id"`
-	}
-	
-	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "参数错误: "+err.Error())
+		fail(c, http.StatusInternalServerError, "系统错误：无法获取用户信息")
 		return
 	}
 
-	activeId := req.ActivePrimaryID
-	if activeId == 0 { 
-		activeId = req.ActiveID 
+	// 解密凭证
+	var user mainmodel.User
+	if err := h.db.Where("uid = ?", uid).First(&user).Error; err != nil {
+		fail(c, http.StatusNotFound, "用户不存在")
+		return
+	}
+	password, err := h.cc.Decrypt(user.CredentialCipher)
+	if err != nil {
+		fail(c, http.StatusBadRequest, "登录凭证解密失败")
+		return
 	}
 
-	if activeId == 0 || req.CourseID == 0 || req.ClassID == 0 {
-		fail(c, http.StatusBadRequest, "缺少必要参数 (active_id, course_id, class_id)")
+	// 获取当前配置课程
+	cfg, err := h.svc.GetConfig(uid)
+	if err != nil || cfg == nil || cfg.CourseID == 0 || cfg.ClassID == 0 {
+		fail(c, http.StatusBadRequest, "请先配置课程")
+		return
+	}
+
+	// 检测并抢答当前课程的抢答活动
+	detected, _ := h.svc.Monitor.OneClickAnswer(uid, user.Mobile, password, cfg.CourseID, cfg.ClassID)
+
+	success(c, gin.H{
+		"detected":  detected,
+		"answering": detected > 0,
+	})
+
+}
+
+// GetStatus 获取当前状态
+// GET /api/quiz/status
+func (h *QuizHandler) GetStatus(c *gin.Context) {
+	uid := getUserUID(c)
+	if uid == 0 {
+		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+		return
+	}
+
+	mode := h.svc.Monitor.GetMode(uid)
+	cfg, _ := h.svc.GetConfig(uid)
+
+	status := "off"
+	if mode == quizsvc.MonitorPreWarm {
+		status = "prewarming"
+	}
+
+	// 查询最近活动（只展示当前配置课程）
+	var now = time.Now().UnixMilli()
+	var activities []model.QuizActivity
+	query := h.db.Where("user_uid = ?", uid)
+	if cfg != nil && cfg.CourseID > 0 {
+		query = query.Where("course_id = ?", cfg.CourseID)
+	}
+	query.Order("created_at desc").Limit(10).Find(&activities)
+
+	// 查询已有记录的活动 ID 集合（有记录说明已处理过：已抢答/已结束/人数满）
+	var recordIDs []int64
+	h.db.Model(&model.QuizRecord{}).Where("user_uid = ?", uid).Pluck("activity_id", &recordIDs)
+	recorded := make(map[int64]bool, len(recordIDs))
+	for _, id := range recordIDs {
+		recorded[id] = true
+	}
+
+	for i, act := range activities {
+		if act.Status != 1 {
+			continue
+		}
+		// 条件1：end_time 已过
+		if act.EndTime > 0 && now >= act.EndTime {
+			activities[i].Status = 2
+			continue
+		}
+		// 条件2：已有抢答记录（说明已被处理过——无论成功失败或已结束）
+		if recorded[act.ActivityID] {
+			activities[i].Status = 2
+		}
+	}
+
+	// 查询统计
+	var totalRecords int64
+	var successRecords int64
+	h.db.Model(&model.QuizRecord{}).Where("user_uid = ?", uid).Count(&totalRecords)
+	h.db.Model(&model.QuizRecord{}).Where("user_uid = ? AND success = ?", uid, true).Count(&successRecords)
+
+	success(c, gin.H{
+		"mode":         status,
+		"running":      false,
+		"prewarming":   mode == quizsvc.MonitorPreWarm,
+		"config":       cfg,
+		"activities":   activities,
+		"total_count":  totalRecords,
+		"success_count": successRecords,
+	})
+}
+
+// ================= 旧接口保留兼容 =================
+
+// StartMonitor 启动预热
+func (h *QuizHandler) StartMonitor(c *gin.Context) {
+	uid := getUserUID(c)
+	if uid == 0 {
+		fail(c, http.StatusInternalServerError, "无法获取用户信息")
 		return
 	}
 
@@ -297,73 +363,30 @@ func (h *QuizHandler) SubmitAnswer(c *gin.Context) {
 		fail(c, http.StatusNotFound, "用户不存在")
 		return
 	}
-
 	password, err := h.cc.Decrypt(user.CredentialCipher)
 	if err != nil {
-		// ✅ 修复：改为 400，并打印详细日志，绝不返回 401！
-		log.Printf("❌ [用户%d] 解密凭证失败: %v, cipher_len=%d", uid, err, len(user.CredentialCipher))
-		fail(c, http.StatusBadRequest, "登录凭证解密失败，请在系统中重新绑定/登录超星账号")
+		fail(c, http.StatusBadRequest, "登录凭证解密失败")
 		return
 	}
 
-	result, err := h.xxtClient.QuickAnswer(user.Mobile, password, req.CourseID, req.ClassID, activeId)
-	if err != nil {
-		fail(c, http.StatusInternalServerError, "抢答请求失败: "+err.Error())
+	cfg, err := h.svc.GetConfig(uid)
+	if err != nil || cfg == nil || cfg.CourseID == 0 || cfg.ClassID == 0 {
+		fail(c, http.StatusBadRequest, "请先配置课程")
 		return
 	}
 
-	isSuccess := false
-	resultMsg := "抢答结果未知"
+	h.svc.Monitor.StartPreWarm(uid, user.Mobile, password, cfg.CourseID, cfg.ClassID)
+	success(c, gin.H{"message": "预热已启动"})
+}
 
-	// 基于真实抓包解析 stuAnswer 返回（与 monitor.autoAnswer 一致）
-	var res struct {
-		Result   int             `json:"result"`
-		Msg      string          `json:"msg"`
-		ErrorMsg string          `json:"errorMsg"`
-		Data     json.RawMessage `json:"data"`
+// StopMonitor 停止预热
+func (h *QuizHandler) StopMonitor(c *gin.Context) {
+	uid := getUserUID(c)
+	if uid == 0 {
+		fail(c, http.StatusInternalServerError, "无法获取用户信息")
+		return
 	}
 
-	if err := json.Unmarshal([]byte(result), &res); err == nil {
-		if res.ErrorMsg != "" {
-			resultMsg = res.ErrorMsg
-		} else if res.Msg != "" {
-			resultMsg = res.Msg
-		}
-		if res.Result == 1 {
-			// result=1 可能表示成功，也可能是 data=1（人数已满）
-			if string(res.Data) == "1" {
-				isSuccess = false
-				resultMsg = "抢答人数已达上限"
-			} else {
-				isSuccess = true
-				if resultMsg == "" || resultMsg == res.ErrorMsg {
-					resultMsg = "抢答成功！"
-				}
-			}
-		}
-	} else {
-		lower := strings.ToLower(result)
-		if strings.Contains(lower, "抢答成功") || strings.Contains(lower, "success") || strings.Contains(result, `"result":1`) {
-			isSuccess = true
-			resultMsg = "抢答成功！"
-		} else if strings.Contains(lower, "fail") || strings.Contains(lower, "error") || strings.Contains(lower, "已结束") {
-			resultMsg = result
-		} else {
-			resultMsg = result
-		}
-	}
-
-	record := &model.QuizRecord{
-		UserUID:    uid,
-		ActivityID: activeId,
-		Success:    isSuccess,
-		Message:    resultMsg,
-	}
-	h.db.Create(record)
-
-	if isSuccess {
-		success(c, gin.H{"active_id": activeId, "message": resultMsg})
-	} else {
-		fail(c, http.StatusBadRequest, resultMsg)
-	}
+	h.svc.Monitor.Stop(uid)
+	success(c, gin.H{"message": "已停止"})
 }

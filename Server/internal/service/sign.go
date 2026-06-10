@@ -4,12 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"xbt2/server/internal/model"
 	"xbt2/server/internal/xxt"
+)
+
+const (
+	signMaxRetries      = 2                 // 签到请求最大重试次数（网络级重试）
+	signRetryBackoff    = 500 * time.Millisecond // 重试基础等待时间
+	sourceNameCacheTTL  = 5 * time.Minute   // 用户名称缓存有效期
 )
 
 type SignService struct {
@@ -66,11 +73,57 @@ func (s *SignService) CheckSignStates(activityID int64, userIDs []int64) ([]Sign
 		return nil, errors.New("invalid activity_id")
 	}
 	uniq := dedupeUIDs(userIDs)
+	if len(uniq) == 0 {
+		return []SignCheckItem{}, nil
+	}
+
+	// 批量查询：一次 WHERE IN 替代 N 次独立查询
+	var records []model.SignRecord
+	if err := s.db.Where("activity_id = ? AND user_uid IN ?", activityID, uniq).Find(&records).Error; err != nil {
+		return nil, err
+	}
+	recordByUID := make(map[int64]model.SignRecord, len(records))
+	for _, r := range records {
+		recordByUID[r.UserUID] = r
+	}
+
 	items := make([]SignCheckItem, 0, len(uniq))
 	for _, uid := range uniq {
-		items = append(items, s.resolveSignState(activityID, uid))
+		if rec, ok := recordByUID[uid]; ok {
+			items = append(items, s.buildSignCheckItem(uid, &rec))
+		} else {
+			items = append(items, s.buildSignCheckItem(uid, nil))
+		}
 	}
 	return items, nil
+}
+
+func (s *SignService) buildSignCheckItem(uid int64, rec *model.SignRecord) SignCheckItem {
+	state := SignCheckItem{UserID: uid, Signed: false, RecordSource: 0, RecordSourceName: "", Message: "未签到"}
+	if rec == nil {
+		return state
+	}
+	state.Signed = true
+	state.RecordSource = rec.SourceUID
+	if rec.SourceUID == -1 {
+		state.RecordSourceName = "学习通"
+		state.Message = "该同学已在学习通签到"
+		return state
+	}
+	if rec.SourceUID == uid {
+		state.RecordSourceName = s.getSourceName(uid)
+		if state.RecordSourceName == "" {
+			state.RecordSourceName = "本人"
+		}
+		state.Message = "该同学已本人签到"
+		return state
+	}
+	state.RecordSourceName = s.getSourceName(rec.SourceUID)
+	if state.RecordSourceName == "" {
+		state.RecordSourceName = "未知用户"
+	}
+	state.Message = fmt.Sprintf("该同学已被%s代签", state.RecordSourceName)
+	return state
 }
 
 func (s *SignService) ExecuteOne(operatorUID int64, req ExecuteSignRequest) SignExecuteResult {
@@ -110,7 +163,7 @@ func (s *SignService) ExecuteOne(operatorUID int64, req ExecuteSignRequest) Sign
 		}
 	}
 
-	result, err := s.xxt.Sign(target.Mobile, password, fixed, req.SignType, req.Special)
+	result, err := s.signWithRetry(target.Mobile, password, fixed, req.SignType, req.Special)
 	if err != nil {
 		return SignExecuteResult{UserID: req.TargetUID, Success: false, Message: s.toUserSignMessage(err.Error())}
 	}
@@ -235,53 +288,98 @@ func (s *SignService) toUserSignMessage(raw string) string {
 	}
 }
 
-func (s *SignService) resolveSignState(activityID, uid int64) SignCheckItem {
-	state := SignCheckItem{UserID: uid, Signed: false, RecordSource: 0, RecordSourceName: "", Message: "未签到"}
-	if activityID <= 0 || uid <= 0 {
-		return state
+// signWithRetry 签到请求带网络级重试，仅对瞬态错误进行重试
+func (s *SignService) signWithRetry(mobile, password string, fixed xxt.FixedParams, signType int, special map[string]any) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt <= signMaxRetries; attempt++ {
+		result, err := s.xxt.Sign(mobile, password, fixed, signType, special)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		// 仅对网络/超时类错误重试，应用层错误不重试
+		if !isTransientNetworkError(err) {
+			break
+		}
+		if attempt < signMaxRetries {
+			time.Sleep(signRetryBackoff * time.Duration(1<<attempt))
+		}
 	}
+	return "", lastErr
+}
 
+// isTransientNetworkError 判断是否为可重试的瞬态网络错误
+func isTransientNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// 超时类
+	if strings.Contains(msg, "timeout") || strings.Contains(msg, "time out") {
+		return true
+	}
+	// 连接类
+	if strings.Contains(msg, "connection reset") || strings.Contains(msg, "connection refused") {
+		return true
+	}
+	if strings.Contains(msg, "connection closed") || strings.Contains(msg, "broken pipe") {
+		return true
+	}
+	// DNS 类
+	if strings.Contains(msg, "no such host") || strings.Contains(msg, "temporary failure") {
+		return true
+	}
+	// TLS 握手类
+	if strings.Contains(msg, "handshake") || strings.Contains(msg, "tls") {
+		return true
+	}
+	return false
+}
+
+func (s *SignService) resolveSignState(activityID, uid int64) SignCheckItem {
+	if activityID <= 0 || uid <= 0 {
+		return SignCheckItem{UserID: uid, Signed: false, RecordSource: 0, RecordSourceName: "", Message: "未签到"}
+	}
 	var rec model.SignRecord
 	if err := s.db.Where("user_uid = ? AND activity_id = ?", uid, activityID).Take(&rec).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return state
+			return SignCheckItem{UserID: uid, Signed: false, RecordSource: 0, RecordSourceName: "", Message: "未签到"}
 		}
-		state.Message = "查询失败"
-		return state
+		return SignCheckItem{UserID: uid, Signed: false, RecordSource: 0, RecordSourceName: "", Message: "查询失败"}
 	}
-
-	state.Signed = true
-	state.RecordSource = rec.SourceUID
-	if rec.SourceUID == -1 {
-		state.RecordSourceName = "学习通"
-		state.Message = "该同学已在学习通签到"
-		return state
-	}
-	if rec.SourceUID == uid {
-		state.RecordSourceName = s.getSourceName(uid)
-		if state.RecordSourceName == "" {
-			state.RecordSourceName = "本人"
-		}
-		state.Message = "该同学已本人签到"
-		return state
-	}
-	state.RecordSourceName = s.getSourceName(rec.SourceUID)
-	if state.RecordSourceName == "" {
-		state.RecordSourceName = "未知用户"
-	}
-	state.Message = fmt.Sprintf("该同学已被%s代签", state.RecordSourceName)
-	return state
+	return s.buildSignCheckItem(uid, &rec)
 }
+
+// sourceNameCache 用户名称缓存（同一次操作中多次查询同一用户时避免重复 DB 查询）
+var sourceNameCache sync.Map
 
 func (s *SignService) getSourceName(sourceUID int64) string {
 	if sourceUID <= 0 {
 		return ""
 	}
+	// 查缓存
+	if cached, ok := sourceNameCache.Load(sourceUID); ok {
+		entry := cached.(*sourceNameEntry)
+		if time.Since(entry.fetchedAt) < sourceNameCacheTTL {
+			return entry.name
+		}
+		// 过期了，删除后重新查询
+		sourceNameCache.Delete(sourceUID)
+	}
 	var user model.User
 	if err := s.db.Where("uid = ?", sourceUID).Take(&user).Error; err != nil {
+		// 写入空缓存防止反复查询不存在的用户（短期有效）
+		sourceNameCache.Store(sourceUID, &sourceNameEntry{name: "", fetchedAt: time.Now()})
 		return ""
 	}
-	return strings.TrimSpace(user.Name)
+	name := strings.TrimSpace(user.Name)
+	sourceNameCache.Store(sourceUID, &sourceNameEntry{name: name, fetchedAt: time.Now()})
+	return name
+}
+
+type sourceNameEntry struct {
+	name      string
+	fetchedAt time.Time
 }
 
 func dedupeUIDs(userIDs []int64) []int64 {

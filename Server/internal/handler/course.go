@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -67,6 +68,9 @@ func (h *CourseHandler) Sync(c *gin.Context) {
 		common.Fail(c, 500, "sync courses failed: "+err.Error())
 		return
 	}
+
+	// 收集本次同步的有效课程集合
+	syncedSet := make(map[string]struct{}, len(courses))
 	for _, course := range courses {
 		co := model.Course{CourseID: course.CourseID, ClassID: course.ClassID, Name: course.Name, Teacher: course.Teacher, Icon: course.Icon}
 		_ = h.db.Clauses(clause.OnConflict{
@@ -76,7 +80,30 @@ func (h *CourseHandler) Sync(c *gin.Context) {
 
 		uc := model.UserCourse{UserUID: uid, CourseID: course.CourseID, ClassID: course.ClassID, IsSelected: false}
 		_ = h.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_uid"}, {Name: "course_id"}, {Name: "class_id"}}, DoNothing: true}).Create(&uc).Error
+
+		key := fmt.Sprintf("%d:%d", course.CourseID, course.ClassID)
+		syncedSet[key] = struct{}{}
 	}
+
+	// 删除该用户在超星上已移除的课程关联
+	var staleRecords []model.UserCourse
+	h.db.Where("user_uid = ?", uid).Find(&staleRecords)
+	for _, rec := range staleRecords {
+		key := fmt.Sprintf("%d:%d", rec.CourseID, rec.ClassID)
+		if _, ok := syncedSet[key]; !ok {
+			h.db.Where("user_uid = ? AND course_id = ? AND class_id = ?",
+				uid, rec.CourseID, rec.ClassID).Delete(&model.UserCourse{})
+		}
+	}
+
+	// 清理已无任何用户引用的孤立课程记录
+	h.db.Exec(`
+		DELETE FROM courses
+		WHERE (course_id, class_id) NOT IN (
+			SELECT course_id, class_id FROM user_courses
+		)
+	`)
+
 	common.Success(c, gin.H{"count": len(courses)})
 }
 

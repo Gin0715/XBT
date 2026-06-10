@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, MapPin, CheckCircle2, Loader2, Crosshair, ExternalLink } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { getBMapInstances, reverseGeocode } from '../../utils/bmap';
 
 interface BMapPickerProps {
@@ -134,8 +135,7 @@ const BMapPicker: React.FC<BMapPickerProps> = ({
       }
       updateSelected(pos.lat, pos.lng);
     } catch (err: any) {
-      // 定位失败不报错，用户仍可手动选点
-      console.warn('[BMapPicker] 自动定位失败', err);
+      toast.error('定位失败: ' + (err.message || '未知错误'));
     }
   }, [updateSelected]);
 

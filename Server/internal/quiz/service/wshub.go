@@ -50,11 +50,19 @@ type WSConn struct {
 
 // WSHub 管理所有前端 WebSocket 连接
 type WSHub struct {
-	conns map[int64]*WSConn // userUID → 唯一连接
-	mu    sync.RWMutex
+	conns   map[int64]*WSConn // userUID → 唯一连接
+	mu      sync.RWMutex
+	monitor *QuizMonitor
 }
 
 var DefaultWSHub = NewWSHub()
+
+// SetMonitor 设置监控管理器（WS 连接断开时自动停止监控）
+func (h *WSHub) SetMonitor(m *QuizMonitor) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.monitor = m
+}
 
 func NewWSHub() *WSHub {
 	return &WSHub{
@@ -63,6 +71,7 @@ func NewWSHub() *WSHub {
 }
 
 // Register 注册新连接，踢掉旧连接（单用户唯一连接）
+// 自动启动预热，确保用户点击一键抢答时秒级响应
 func (h *WSHub) Register(conn *websocket.Conn, userUID, courseID, classID int64) *WSConn {
 	h.mu.Lock()
 	// 踢掉旧连接（优雅关闭，等待 writePump 退出）
@@ -95,12 +104,21 @@ func (h *WSHub) Register(conn *websocket.Conn, userUID, courseID, classID int64)
 	go wc.writePump()
 	go wc.readPump()
 
+	// WS 连接时自动启动预热（低频率轮询保持缓存和 session 活跃）
+	if h.monitor != nil {
+		go h.monitor.StartPreWarmFromDB(userUID, courseID, classID)
+	}
+
 	return wc
 }
 
-// Unregister 注销连接
+// Unregister 注销连接（WS 断开时完全停止监控和预热）
 func (h *WSHub) Unregister(userUID int64) {
 	h.mu.Lock()
+	// WS 断开时完全停止监控和预热
+	if h.monitor != nil {
+		h.monitor.FullStop(userUID)
+	}
 	if wc, exists := h.conns[userUID]; exists {
 		wc.closeMu.Lock()
 		isClosed := wc.closed

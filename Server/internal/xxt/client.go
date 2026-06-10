@@ -31,11 +31,20 @@ const (
 	captchaType  = "slide"
 )
 
+// 抢答风控退避上限（防止 count 无限增长）
+const (
+	maxQuizBackoffCount    = 8               // 抢答最大退避次数，达到后不再递增
+	maxSignBackoffCount    = 5               // 签到最大退避次数
+	resetBackoffAfter      = 2 * time.Minute // 连续退避超时后硬重置
+	quizProbeBackoffMinGap = 2 * time.Second // 退避期间探测最小间隔（原 800ms 太激进）
+)
+
 type activesCacheEntry struct {
-	actives      []Active
-	timestamp    time.Time
-	backoffUntil time.Time // 风控退避截止时间
-	backoffCount int       // 连续风控次数
+	actives        []Active
+	timestamp      time.Time
+	backoffUntil   time.Time // 风控退避截止时间
+	backoffCount   int       // 连续风控次数
+	firstBackoffAt time.Time // 首次风控时间（用于超时硬重置）
 }
 
 type Client struct {
@@ -74,11 +83,14 @@ type Course struct {
 }
 
 type Active struct {
-	ActiveID  int64
-	Name      string
-	StartTime int64 // 活动开始时间（毫秒时间戳）
-	EndTime   int64 // 活动结束时间（毫秒时间戳）
-	Status    int   // 活动状态: 0待开始 1进行中 2已结束
+	ActiveID   int64
+	Name       string
+	ActiveType int   // 超星活动类型: 2=签到, 3=抢答/问答, 6/8=答题
+	CourseID   int64 // 所属课程ID
+	ClassID    int64 // 所属班级ID
+	StartTime  int64 // 活动开始时间（毫秒时间戳）
+	EndTime    int64 // 活动结束时间（毫秒时间戳）
+	Status     int   // 活动状态: 0待开始 1进行中 2已结束
 }
 
 type SignDetail struct {
@@ -310,11 +322,15 @@ func (c *Client) fetchActivesRaw(mobile, password string, courseID, classID int6
 		inBackoff := now.Before(entry.backoffUntil)
 		if inBackoff {
 			if caller == "quiz" {
-				// 抢答退避期间：每 1.5s 做一次探测请求，不完全停止（极速模式更快恢复）
-				if time.Since(entry.timestamp) < 800*time.Millisecond {
+				if entry.backoffCount >= maxQuizBackoffCount {
+					// 已达最大退避次数：完全停止探测，等退避超时后自然恢复
 					return nil
 				}
-				// 3s 已过，穿透退避做探测（下面继续执行 HTTP 请求）
+				// 退避期间降低探测频率，避免自激
+				if time.Since(entry.timestamp) < quizProbeBackoffMinGap {
+					return nil
+				}
+				// 间隔足够，穿透退避做一次探测
 			} else {
 				// 签到退避期间：完全停止（非时间敏感）
 				return nil
@@ -370,31 +386,56 @@ func (c *Client) fetchActivesRaw(mobile, password string, courseID, classID int6
 	// 更新缓存 + 处理退避
 	c.cacheMu.Lock()
 	prevBackoffCount := 0
+	var prevFirstBackoff time.Time
 	if hasEntry {
 		prevBackoffCount = entry.backoffCount
+		prevFirstBackoff = entry.firstBackoffAt
 	}
 	newEntry := &activesCacheEntry{
-		actives:      rawToActives(activeList, c.activeFetchMax, false),
-		timestamp:    time.Now(),
-		backoffCount: prevBackoffCount,
+		actives:        rawToActives(activeList, c.activeFetchMax, false),
+		timestamp:      time.Now(),
+		backoffCount:   prevBackoffCount,
+		firstBackoffAt: prevFirstBackoff,
 	}
 	if isRateLimited {
-		newEntry.backoffCount++
-		// 指数退避: 5s * 2^count，最大 15s（快速恢复）
-		backoffSec := 5
-		for i := 1; i < newEntry.backoffCount && backoffSec < 15; i++ {
-			backoffSec *= 2
+		maxCount := maxQuizBackoffCount
+		if caller == "sign" {
+			maxCount = maxSignBackoffCount
 		}
-		newEntry.backoffUntil = time.Now().Add(time.Duration(backoffSec) * time.Second)
-		log.Printf("[%s] 风控退避: course=%d class=%d count=%d backoff=%ds",
-			caller, courseID, classID, newEntry.backoffCount, backoffSec)
+
+		if newEntry.backoffCount < maxCount {
+			newEntry.backoffCount++
+		}
+		// 首次风控时记录时间戳
+		if newEntry.firstBackoffAt.IsZero() {
+			newEntry.firstBackoffAt = time.Now()
+		}
+
+		// 连续退避超过重置时限 → 硬重置
+		if time.Since(newEntry.firstBackoffAt) > resetBackoffAfter {
+			newEntry.backoffCount = 0
+			newEntry.firstBackoffAt = time.Time{}
+			log.Printf("[%s] 风控退避超时重置: course=%d class=%d",
+				caller, courseID, classID)
+		} else if newEntry.backoffCount <= maxCount {
+			// 指数退避: 3s * 2^count，最大 12s（快速恢复，避免长时间卡死）
+			backoffSec := 3
+			for i := 1; i < newEntry.backoffCount && backoffSec < 12; i++ {
+				backoffSec *= 2
+			}
+			newEntry.backoffUntil = time.Now().Add(time.Duration(backoffSec) * time.Second)
+			log.Printf("[%s] 风控退避: course=%d class=%d count=%d backoff=%ds",
+				caller, courseID, classID, newEntry.backoffCount, backoffSec)
+		}
 		// 保留旧缓存数据（如果有的话）
 		if hasEntry && len(entry.actives) > 0 {
 			newEntry.actives = entry.actives
 		}
+		// 已达最大退避次数后不再输出日志（静默等待超时重置）
 	} else {
-		// 成功请求，重置退避计数
+		// 成功请求：重置退避状态
 		newEntry.backoffCount = 0
+		newEntry.firstBackoffAt = time.Time{}
 		// 如果之前处于退避中，记录恢复日志
 		if prevBackoffCount > 0 {
 			log.Printf("[%s] 风控退避结束: course=%d class=%d 已恢复正常",
@@ -424,7 +465,7 @@ func rawToActives(activeList []map[string]interface{}, max int, signOnly bool) [
 	out := make([]Active, 0)
 	seen := make(map[int64]struct{})
 	for _, a := range activeList {
-		activeType := int64FromAny(firstNonNil(a["activeType"], a["type"], a["atype"]))
+		activeType := int(int64FromAny(firstNonNil(a["activeType"], a["type"], a["atype"])))
 		name := strVal(firstNonNil(a["nameOne"], a["name"], a["activeName"], a["title"]))
 		id := int64FromAny(firstNonNil(a["id"], a["activeId"], a["active_id"]))
 		if id == 0 {
@@ -445,11 +486,12 @@ func rawToActives(activeList []map[string]interface{}, max int, signOnly bool) [
 		et := int64FromAny(firstNonNil(a["endTime"], a["end_time"], a["endTimestamp"]))
 		status := int(int64FromAny(firstNonNil(a["status"], a["state"])))
 		out = append(out, Active{
-			ActiveID:  id,
-			Name:      name,
-			StartTime: st,
-			EndTime:   et,
-			Status:    status,
+			ActiveID:   id,
+			Name:       name,
+			ActiveType: activeType,
+			StartTime:  st,
+			EndTime:    et,
+			Status:     status,
 		})
 		if len(out) >= max {
 			break
@@ -547,6 +589,56 @@ func (c *Client) GetActivesAllFast(mobile, password string, courseID, classID in
 		c.cacheMu.RUnlock()
 		return []Active{}, nil
 	}
+	return rawToActives(activeList, c.activeFetchMax, false), nil
+}
+
+// GetActivesAllForce 强制从超星拉取最新活动列表（绕过缓存和风控退避）
+// 用于一键抢答的即时检测场景，确保获取最新数据而非过期缓存
+func (c *Client) GetActivesAllForce(mobile, password string, courseID, classID int64) ([]Active, error) {
+	// 清空抢答缓存，绕过退避
+	c.ResetQuizCache(courseID, classID)
+
+	s, err := c.ensureSession(mobile, password)
+	if err != nil {
+		return nil, err
+	}
+	cli := *c.http
+	cli.Jar = s.Jar
+
+	u := fmt.Sprintf("https://mobilelearn.chaoxing.com/ppt/activeAPI/taskactivelist?courseId=%d&classId=%d", courseID, classID)
+	req, _ := http.NewRequest(http.MethodGet, u, nil)
+	req.Header.Set("User-Agent", c.mobileUA)
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("强制获取活动列表失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var payload interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+
+	activeList := findActiveList(payload)
+	if len(activeList) == 0 {
+		activeList = findBestActivityArray(payload)
+	}
+
+	// 更新缓存（重置退避状态）
+	c.cacheMu.Lock()
+	now := time.Now()
+	cacheKey := fmt.Sprintf("quiz:%d:%d", courseID, classID)
+	c.activesCache[cacheKey] = &activesCacheEntry{
+		actives:        rawToActives(activeList, c.activeFetchMax, false),
+		timestamp:      now,
+		backoffCount:   0,
+		firstBackoffAt: time.Time{},
+	}
+	c.cacheMu.Unlock()
+
 	return rawToActives(activeList, c.activeFetchMax, false), nil
 }
 
@@ -671,7 +763,6 @@ func (c *Client) Sign(mobile, password string, fixed FixedParams, signType int, 
 		params.Set("useragent", "")
 		params.Set("latitude", "-1")
 		params.Set("longitude", "-1")
-		return c.doStuSignRequest(&cli, params)
 	}
 	// 先空 validate 发起一次请求；仅在学习通明确要求时再走验证码。
 	params.Set("validate", "")
@@ -874,7 +965,6 @@ func (c *Client) QuickAnswer(mobile, password string, courseID, classID, activeI
 	}
 	return result, nil
 }
-
 
 // AnswerAttendInfoResult 活动详情 + 抢答状态（抓包: /v2/apis/answer/getAnswerAttendInfo）
 type AnswerAttendInfoResult struct {

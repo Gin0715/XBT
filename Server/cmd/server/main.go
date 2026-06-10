@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"xbt2/server/internal/config"
 	"xbt2/server/internal/db"
@@ -28,7 +32,7 @@ func main() {
 		log.Fatalf("db init failed: %v", err)
 	}
 
-	// ✅ 自动迁移抢答功能相关数据库表
+	// 自动迁移抢答功能相关数据库表
 	if err := database.AutoMigrate(&quizmodel.QuizConfig{}, &quizmodel.QuizRecord{}, &quizmodel.QuizActivity{}); err != nil {
 		log.Printf("quiz auto migrate failed: %v", err)
 	}
@@ -44,14 +48,16 @@ func main() {
 	whitelistHandler := handler.NewWhitelistHandler(database)
 	locationHandler := handler.NewLocationHandler(database)
 
-	// ✅ 一次性清理旧版硬编码默认地址（HA~HE），不影响用户自建数据
+	// 清理旧版硬编码默认地址
 	if err := locationHandler.CleanupLegacyDefaults(); err != nil {
 		log.Printf("cleanup legacy location defaults failed: %v", err)
 	}
 
-	// ✅ 修复：初始化 MonitorService 并传入 QuizHandler
-	monitorSvc := quizsvc.NewQuizMonitorService(database, xxtClient, credentialCrypto)
-	quizHandler := quizhandler.NewQuizHandler(database, xxtClient, credentialCrypto, monitorSvc)
+	// 初始化 MonitorService 并传入 QuizHandler
+	quizSvc := quizsvc.NewQuizService(database, xxtClient, credentialCrypto)
+	quizHandler := quizhandler.NewQuizHandler(database, xxtClient, credentialCrypto, quizSvc)
+	// 将 Monitor 注册到 WS Hub（WS 断开时自动停止监控）
+	quizsvc.DefaultWSHub.SetMonitor(quizSvc.Monitor)
 
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisAddr,
@@ -87,25 +93,26 @@ func main() {
 			authed.POST("/sign/execute", signHandler.Execute)
 			authed.POST("/sign/photo", signHandler.Photo)
 
-			// 位置预设（地址库）管理路由
+			// 地址库管理
 			authed.GET("/locations", locationHandler.List)
 			authed.POST("/locations", locationHandler.Create)
 			authed.PUT("/locations/:id", locationHandler.Update)
 			authed.DELETE("/locations/:id", locationHandler.Delete)
 
-			// 抢答功能路由
+			// == 抢答功能路由 ==
 			authed.GET("/quiz/config", quizHandler.GetConfig)
 			authed.PUT("/quiz/config", quizHandler.UpdateConfig)
-			authed.POST("/quiz/monitor/start", quizHandler.StartMonitor)
-			authed.POST("/quiz/monitor/stop", quizHandler.StopMonitor)
-			authed.GET("/quiz/status", quizHandler.GetStatus)
 			authed.GET("/quiz/records", quizHandler.GetRecords)
 			authed.DELETE("/quiz/records", quizHandler.ClearRecords)
 			authed.GET("/quiz/activities", quizHandler.GetActivities)
 			authed.POST("/quiz/answer", quizHandler.SubmitAnswer)
-			authed.POST("/quiz/submit", quizHandler.SubmitAnswer) // 前端兼容别名
-			authed.GET("/quiz/events", quizHandler.Events)        // SSE 实时事件推送
-			authed.GET("/quiz/ws", quizHandler.WS)                // WebSocket 实时推送（前端）
+			authed.POST("/quiz/submit", quizHandler.SubmitAnswer)                // 前端兼容别名
+			authed.POST("/quiz/one-click-answer", quizHandler.ToggleMonitor)     // 统一一键抢答
+			authed.GET("/quiz/status", quizHandler.GetStatus)                   // 统一状态查询
+			authed.POST("/quiz/monitor/start", quizHandler.StartMonitor)         // 兼容旧版
+			authed.POST("/quiz/monitor/stop", quizHandler.StopMonitor)           // 兼容旧版
+			authed.GET("/quiz/events", quizHandler.Events)                      // SSE 实时事件推送
+			authed.GET("/quiz/ws", quizHandler.WS)                             // WebSocket 实时推送
 
 			admin := authed.Group("/admin")
 			admin.Use(middleware.AdminOnly())
@@ -118,10 +125,44 @@ func main() {
 		}
 	}
 
-	log.Printf("xbt2 server listening on %s (app_env=%s, gin_mode=%s)", cfg.HTTPAddr, cfg.AppEnv, gin.Mode())
-	if err := r.Run(cfg.HTTPAddr); err != nil {
-		log.Fatalf("server start failed: %v", err)
+	// ================= 优雅关闭：信号监听 =================
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// 启动 HTTP 服务（在 goroutine 中）
+	go func() {
+		log.Printf("xbt2 server listening on %s (app_env=%s, gin_mode=%s)", cfg.HTTPAddr, cfg.AppEnv, gin.Mode())
+		if err := r.Run(cfg.HTTPAddr); err != nil {
+			log.Fatalf("server start failed: %v", err)
+		}
+	}()
+
+	// 等待退出信号
+	sig := <-quit
+	log.Printf("收到退出信号: %v，开始优雅关闭...", sig)
+
+	// 1. 停止所有监控 Goroutine
+	quizSvc.Shutdown()
+
+	// 2. 关闭数据库连接
+	sqlDB, err := database.DB()
+	if err == nil {
+		sqlDB.SetMaxOpenConns(10) // 降低连接数后关闭
+		_ = sqlDB.Close()
+		log.Printf("数据库连接已关闭")
 	}
+
+	// 3. 关闭 Redis
+	if err := redisClient.Close(); err != nil {
+		log.Printf("redis 关闭异常: %v", err)
+	} else {
+		log.Printf("Redis 连接已关闭")
+	}
+
+	// 4. 等待异步资源释放
+	time.Sleep(500 * time.Millisecond)
+
+	log.Printf("✅ 服务已安全关闭")
 }
 
 func resolveGinMode(appEnv string) string {
