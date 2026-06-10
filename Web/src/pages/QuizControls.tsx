@@ -36,7 +36,7 @@ function QuizControlsInner({
   loading,
   saveSuccess,
   onConfigChange,
-  _onCourseSelect,
+  onCourseSelect: _onCourseSelect,
   onSave,
   onSyncCourses,
 }: QuizControlsProps) {
